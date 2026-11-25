@@ -87,6 +87,7 @@ data class CroixDesignState(
     val backdropMotionSpeed: Float = 1.0f,
     // Free Gradient & Color Engine
     val colorMode: PrimeColorMode = PrimeColorMode.VIOLET_GLASS,
+    val useGradientStyle: Boolean = true,
     val customAccentArgb: Long = 0xFFA238FF,
     val secondaryAccentArgb: Long = 0xFFFF2E93,
     val primaryHue: Float = 272f,

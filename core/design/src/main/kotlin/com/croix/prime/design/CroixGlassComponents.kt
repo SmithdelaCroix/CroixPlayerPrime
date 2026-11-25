@@ -124,13 +124,17 @@ fun CroixPrimeTheme(
         PrimeColorMode.AMOLED_BLACK -> albumSeedPrimary ?: Color(0xFFA238FF)
         PrimeColorMode.CUSTOM_GRADIENT -> safeDesign.customPrimaryFromHue
     }
-    val targetSecondary = when (safeDesign.colorMode) {
-        PrimeColorMode.VIOLET_GLASS -> Color(0xFFFF2E93)
-        PrimeColorMode.NEON_CYAN -> Color(0xFF7C4DFF)
-        PrimeColorMode.ALBUM_MORPH -> albumSeedSecondary ?: Color(0xFF00E5FF)
-        PrimeColorMode.DYNAMIC_SYSTEM -> dynamicDarkColorScheme(context).tertiary
-        PrimeColorMode.AMOLED_BLACK -> Color(0xFF3A3A48)
-        PrimeColorMode.CUSTOM_GRADIENT -> safeDesign.customSecondaryFromHue
+    val targetSecondary = if (!safeDesign.useGradientStyle) {
+        targetPrimary
+    } else {
+        when (safeDesign.colorMode) {
+            PrimeColorMode.VIOLET_GLASS -> Color(0xFFFF2E93)
+            PrimeColorMode.NEON_CYAN -> Color(0xFF7C4DFF)
+            PrimeColorMode.ALBUM_MORPH -> albumSeedSecondary ?: Color(0xFF00E5FF)
+            PrimeColorMode.DYNAMIC_SYSTEM -> dynamicDarkColorScheme(context).tertiary
+            PrimeColorMode.AMOLED_BLACK -> Color(0xFF3A3A48)
+            PrimeColorMode.CUSTOM_GRADIENT -> safeDesign.customSecondaryFromHue
+        }
     }
     val targetBg = when (safeDesign.colorMode) {
         PrimeColorMode.AMOLED_BLACK -> Color.Black
@@ -141,28 +145,32 @@ fun CroixPrimeTheme(
     val secondary by animateColorAsState(targetSecondary, tween(450), label = "secondary")
     val bg by animateColorAsState(targetBg, tween(450), label = "bg")
 
-    val resolved = CroixResolvedPalette(
-        primary = primary,
-        secondary = secondary,
-        background = bg,
-        glassSurface = Color.White.copy(alpha = safeDesign.glassOpacity),
-        glassBorderTop = Color.White.copy(alpha = safeDesign.borderGlowAlpha),
-        glassBorderBottom = primary.copy(alpha = (safeDesign.borderGlowAlpha * 0.45f).coerceIn(0f, 0.35f)),
-        textPrimary = Color.White,
-        textSecondary = Color.White.copy(alpha = 0.68f),
-    )
+    val resolved = androidx.compose.runtime.remember(primary, secondary, bg, safeDesign.glassOpacity, safeDesign.borderGlowAlpha) {
+        CroixResolvedPalette(
+            primary = primary,
+            secondary = secondary,
+            background = bg,
+            glassSurface = Color.White.copy(alpha = safeDesign.glassOpacity),
+            glassBorderTop = Color.White.copy(alpha = safeDesign.borderGlowAlpha),
+            glassBorderBottom = primary.copy(alpha = (safeDesign.borderGlowAlpha * 0.45f).coerceIn(0f, 0.35f)),
+            textPrimary = Color.White,
+            textSecondary = Color.White.copy(alpha = 0.68f),
+        )
+    }
 
-    val m3Scheme = darkColorScheme(
-        primary = primary,
-        secondary = secondary,
-        background = bg,
-        surface = Color(0xFF13111E),
-        surfaceVariant = Color(0xFF1E1B2E),
-        onPrimary = Color.White,
-        onBackground = Color.White,
-        onSurface = Color.White,
-        onSurfaceVariant = Color.White.copy(alpha = 0.72f),
-    )
+    val m3Scheme = androidx.compose.runtime.remember(primary, secondary, bg) {
+        darkColorScheme(
+            primary = primary,
+            secondary = secondary,
+            background = bg,
+            surface = Color(0xFF13111E),
+            surfaceVariant = Color(0xFF1E1B2E),
+            onPrimary = Color.White,
+            onBackground = Color.White,
+            onSurface = Color.White,
+            onSurfaceVariant = Color.White.copy(alpha = 0.72f),
+        )
+    }
 
     CompositionLocalProvider(
         LocalCroixDesign provides safeDesign,
@@ -177,7 +185,7 @@ fun CroixPrimeTheme(
 }
 
 /**
- * Full-screen living reactive backdrop with gently drifting gradient orbs behind frosted glass surfaces.
+ * 120fps zero-recomposition ambient backdrop using Canvas radial gradients (no expensive full-screen RenderEffect blur!).
  */
 @Composable
 fun CroixAnimatedBackdrop(
@@ -187,48 +195,52 @@ fun CroixAnimatedBackdrop(
     val palette = LocalCroixPalette.current
     val glow = design.ambientGlowStrength
 
-    val transition = rememberInfiniteTransition(label = "backdrop_orbs")
-    val durationMs = (11_000f / design.backdropMotionSpeed).toInt().coerceIn(3_500, 30_000)
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2.0 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(tween(durationMs, easing = LinearEasing), RepeatMode.Restart),
-        label = "orb_phase",
-    )
+    val phaseState = if (design.backdropMotionEnabled && glow > 0.02f) {
+        val transition = rememberInfiniteTransition(label = "backdrop_orbs")
+        val durationMs = (12_000f / design.backdropMotionSpeed).toInt().coerceIn(4_000, 30_000)
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2.0 * PI).toFloat(),
+            animationSpec = infiniteRepeatable(tween(durationMs, easing = LinearEasing), RepeatMode.Restart),
+            label = "orb_phase",
+        )
+    } else null
 
-    val driftX = if (design.backdropMotionEnabled) cos(phase) * 180f else 0f
-    val driftY = if (design.backdropMotionEnabled) sin(phase) * 160f else 0f
-
-    Box(
+    Canvas(
         modifier = modifier
             .fillMaxSize()
             .background(palette.background),
     ) {
-        if (glow > 0.02f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(if (design.glassBlurDp > 0f) (design.glassBlurDp * 1.4f).dp else 0.dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                palette.primary.copy(alpha = glow * 0.68f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(260f + driftX, 240f + driftY),
-                            radius = 920f,
-                        ),
-                    )
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                palette.secondary.copy(alpha = glow * 0.50f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(860f - driftX, 1460f - driftY),
-                            radius = 960f,
-                        ),
-                    ),
+        if (glow <= 0.02f) return@Canvas
+        val phase = phaseState?.value ?: 0f
+        val driftX = if (phaseState != null) cos(phase) * (size.width * 0.14f) else 0f
+        val driftY = if (phaseState != null) sin(phase) * (size.height * 0.09f) else 0f
+
+        if (!design.useGradientStyle) {
+            // Solid color ambient tint mode
+            drawRect(
+                color = palette.primary.copy(alpha = (glow * 0.24f).coerceIn(0f, 0.35f)),
+            )
+        } else {
+            val r1 = size.width * 0.95f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(palette.primary.copy(alpha = glow * 0.56f), Color.Transparent),
+                    center = Offset(size.width * 0.24f + driftX, size.height * 0.14f + driftY),
+                    radius = r1,
+                ),
+                radius = r1,
+                center = Offset(size.width * 0.24f + driftX, size.height * 0.14f + driftY),
+            )
+            val r2 = size.width * 0.98f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(palette.secondary.copy(alpha = glow * 0.42f), Color.Transparent),
+                    center = Offset(size.width * 0.80f - driftX, size.height * 0.78f - driftY),
+                    radius = r2,
+                ),
+                radius = r2,
+                center = Offset(size.width * 0.80f - driftX, size.height * 0.78f - driftY),
             )
         }
     }

@@ -24,6 +24,7 @@ import com.croix.player.prime.data.UserPlaylistEntity
 import com.croix.prime.design.CroixDesignRepository
 import com.croix.prime.design.CroixDesignState
 import com.croix.prime.design.PrimePresets
+import com.croix.prime.engine.ArtistProfile
 import com.croix.prime.engine.HomeSection
 import com.croix.prime.engine.InnerTubeClient
 import com.croix.prime.engine.LrclibClient
@@ -75,7 +76,14 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     val playbackState: StateFlow<PlaybackUiState> = playerController.state
+    val positionMs: StateFlow<Long> = playerController.positionMs
     val downloadProgress: StateFlow<Map<String, Float>> = downloadManager.activeProgress
+
+    private val _artistProfile = MutableStateFlow<ArtistProfile?>(null)
+    val artistProfile: StateFlow<ArtistProfile?> = _artistProfile.asStateFlow()
+
+    private val _artistLoading = MutableStateFlow(false)
+    val artistLoading: StateFlow<Boolean> = _artistLoading.asStateFlow()
 
     val favorites: StateFlow<List<Track>> = dao.observeFavorites()
         .map { list -> list.map { it.toTrack() } }
@@ -248,6 +256,20 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun playTrack(track: Track, queue: List<Track> = listOf(track)) {
         playerController.playTrack(track, queue)
+    }
+
+    fun openArtist(artistName: String) {
+        viewModelScope.launch {
+            _artistLoading.value = true
+            _artistProfile.value = ArtistProfile(name = artistName, avatarUrl = "", topTracks = emptyList())
+            _artistProfile.value = innerTube.fetchArtistProfile(artistName)
+            _artistLoading.value = false
+        }
+    }
+
+    fun closeArtist() {
+        _artistProfile.value = null
+        _artistLoading.value = false
     }
 
     fun onSearchQueryChange(q: String) {

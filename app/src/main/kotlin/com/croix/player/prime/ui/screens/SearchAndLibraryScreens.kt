@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,11 +28,10 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shuffle
@@ -69,7 +67,6 @@ import com.croix.prime.design.CroixGlassCard
 import com.croix.prime.design.LocalCroixDesign
 import com.croix.prime.design.LocalCroixPalette
 import com.croix.prime.engine.Track
-import dev.chrisbanes.haze.HazeState
 
 @Composable
 fun SearchScreen(
@@ -79,13 +76,11 @@ fun SearchScreen(
     downloadedIds: Set<String>,
     downloadProgress: Map<String, Float>,
     isLoading: Boolean,
-    hazeState: HazeState,
     bottomPaddingDp: Int,
     onQueryChange: (String) -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
     onToggleFavorite: (Track) -> Unit,
-    onDownloadTrack: (Track) -> Unit,
-    onRequestAddToPlaylist: (Track) -> Unit,
+    onOpenTrackMenu: (Track) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val palette = LocalCroixPalette.current
@@ -103,14 +98,14 @@ fun SearchScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text("Search", style = MaterialTheme.typography.headlineLarge, color = Color.White)
-            CroixGlassCard(hazeState = hazeState, cornerRadius = 50.dp, onClick = onOpenSettings) {
+            CroixGlassCard(cornerRadius = 50.dp, onClick = onOpenSettings) {
                 IconButton(onClick = onOpenSettings, modifier = Modifier.size(42.dp)) {
                     Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = Color.White)
                 }
             }
         }
 
-        CroixGlassCard(modifier = Modifier.fillMaxWidth(), hazeState = hazeState) {
+        CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -159,11 +154,9 @@ fun SearchScreen(
                         isFavorite = track.id in favoriteIds,
                         isDownloaded = track.id in downloadedIds,
                         downloadingProgress = downloadProgress[track.id],
-                        hazeState = hazeState,
                         onPlay = { onPlayTrack(track, results) },
                         onToggleFavorite = { onToggleFavorite(track) },
-                        onDownload = { onDownloadTrack(track) },
-                        onAddToPlaylist = { onRequestAddToPlaylist(track) },
+                        onOpenMenu = { onOpenTrackMenu(track) },
                     )
                 }
             }
@@ -179,15 +172,14 @@ fun FavoritesScreen(
     playlistTracks: Map<Long, List<Track>>,
     stats: ListeningStatsSummary,
     downloadProgress: Map<String, Float>,
-    hazeState: HazeState,
     bottomPaddingDp: Int,
     onPlayTrack: (Track, List<Track>) -> Unit,
     onToggleFavorite: (Track) -> Unit,
-    onDownloadTrack: (Track) -> Unit,
     onDeleteDownload: (String) -> Unit,
     onCreatePlaylist: (String) -> Unit,
     onDeletePlaylist: (Long) -> Unit,
-    onRequestAddToPlaylist: (Track) -> Unit,
+    onOpenTrackMenu: (Track) -> Unit,
+    onOpenArtist: (String) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val palette = LocalCroixPalette.current
@@ -217,7 +209,7 @@ fun FavoritesScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text("Favorites", style = MaterialTheme.typography.headlineLarge, color = Color.White)
-            CroixGlassCard(hazeState = hazeState, cornerRadius = 50.dp, onClick = onOpenSettings) {
+            CroixGlassCard(cornerRadius = 50.dp, onClick = onOpenSettings) {
                 IconButton(onClick = onOpenSettings, modifier = Modifier.size(42.dp)) {
                     Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = Color.White)
                 }
@@ -230,7 +222,6 @@ fun FavoritesScreen(
         ) {
             tabLabels.forEachIndexed { idx, label ->
                 CroixGlassCard(
-                    hazeState = hazeState,
                     cornerRadius = 50.dp,
                     accentTint = if (selectedTab == idx) palette.primary else null,
                     onClick = {
@@ -255,12 +246,10 @@ fun FavoritesScreen(
                 favIds = favIds,
                 downloadedIds = downloadedIds,
                 downloadProgress = downloadProgress,
-                hazeState = hazeState,
                 bottomPaddingDp = bottomPaddingDp,
                 onPlayTrack = onPlayTrack,
                 onToggleFavorite = onToggleFavorite,
-                onDownloadTrack = onDownloadTrack,
-                onRequestAddToPlaylist = onRequestAddToPlaylist,
+                onOpenTrackMenu = onOpenTrackMenu,
             )
 
             1 -> {
@@ -277,21 +266,18 @@ fun FavoritesScreen(
                     }
                     TrackListSection(
                         tracks = pTracks,
-                        emptyText = "Add tracks to \"${openPlaylist.name}\" using the playlist icon.",
+                        emptyText = "Add tracks to \"${openPlaylist.name}\" using the ⋮ menu.",
                         favIds = favIds,
                         downloadedIds = downloadedIds,
                         downloadProgress = downloadProgress,
-                        hazeState = hazeState,
                         bottomPaddingDp = bottomPaddingDp,
                         onPlayTrack = onPlayTrack,
                         onToggleFavorite = onToggleFavorite,
-                        onDownloadTrack = onDownloadTrack,
-                        onRequestAddToPlaylist = onRequestAddToPlaylist,
+                        onOpenTrackMenu = onOpenTrackMenu,
                     )
                 } else {
                     CroixGlassCard(
                         modifier = Modifier.fillMaxWidth(),
-                        hazeState = hazeState,
                         accentTint = palette.primary,
                         onClick = {
                             newPlaylistName = ""
@@ -317,7 +303,6 @@ fun FavoritesScreen(
                             val count = playlistTracks[pl.playlistId]?.size ?: 0
                             CroixGlassCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                hazeState = hazeState,
                                 onClick = { selectedPlaylistId = pl.playlistId },
                             ) {
                                 Row(
@@ -341,9 +326,9 @@ fun FavoritesScreen(
 
             2 -> {
                 if (downloads.isEmpty()) {
-                    CroixGlassCard(modifier = Modifier.fillMaxWidth(), hazeState = hazeState) {
+                    CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            "Downloaded tracks play offline with zero internet. Tap the download icon on any track.",
+                            "Downloaded tracks play offline with zero internet. Open ⋮ on any track to download.",
                             color = palette.textSecondary,
                             modifier = Modifier.padding(18.dp),
                         )
@@ -358,7 +343,6 @@ fun FavoritesScreen(
                             val mb = "%.1f MB".format(item.fileSizeBytes / (1024f * 1024f))
                             CroixGlassCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                hazeState = hazeState,
                                 onClick = { onPlayTrack(item.toTrack(), dlTracks) },
                             ) {
                                 Row(
@@ -393,13 +377,13 @@ fun FavoritesScreen(
                 ) {
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                            CroixGlassCard(modifier = Modifier.weight(1f), hazeState = hazeState, accentTint = palette.primary) {
+                            CroixGlassCard(modifier = Modifier.weight(1f), accentTint = palette.primary) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Text("${stats.totalPlays}", style = MaterialTheme.typography.headlineMedium, color = Color.White)
                                     Text("Total Plays", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
                                 }
                             }
-                            CroixGlassCard(modifier = Modifier.weight(1f), hazeState = hazeState, accentTint = palette.secondary) {
+                            CroixGlassCard(modifier = Modifier.weight(1f), accentTint = palette.secondary) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Text("${stats.estimatedMinutes} min", style = MaterialTheme.typography.headlineMedium, color = Color.White)
                                     Text("Listening Time", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
@@ -409,13 +393,22 @@ fun FavoritesScreen(
                     }
                     if (stats.topArtists.isNotEmpty()) {
                         item {
-                            CroixGlassCard(modifier = Modifier.fillMaxWidth(), hazeState = hazeState) {
+                            CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("Top Artists", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                                    Text("Top Artists (tap to open profile)", style = MaterialTheme.typography.titleMedium, color = Color.White)
                                     stats.topArtists.forEachIndexed { i, (artist, plays) ->
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                            Text("${i + 1}. $artist", color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                            Text("$plays plays", color = palette.primary, style = MaterialTheme.typography.labelMedium)
+                                        CroixGlassCard(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            cornerRadius = 10.dp,
+                                            onClick = { onOpenArtist(artist) },
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                            ) {
+                                                Text("${i + 1}. $artist", color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                                Text("$plays plays", color = palette.primary, style = MaterialTheme.typography.labelMedium)
+                                            }
                                         }
                                     }
                                 }
@@ -424,7 +417,7 @@ fun FavoritesScreen(
                     }
                     if (stats.topTracks.isNotEmpty()) {
                         item {
-                            CroixGlassCard(modifier = Modifier.fillMaxWidth(), hazeState = hazeState) {
+                            CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("Most Played Tracks", style = MaterialTheme.typography.titleMedium, color = Color.White)
                                     stats.topTracks.forEachIndexed { i, (track, plays) ->
@@ -473,16 +466,14 @@ private fun TrackListSection(
     favIds: Set<String>,
     downloadedIds: Set<String>,
     downloadProgress: Map<String, Float>,
-    hazeState: HazeState,
     bottomPaddingDp: Int,
     onPlayTrack: (Track, List<Track>) -> Unit,
     onToggleFavorite: (Track) -> Unit,
-    onDownloadTrack: (Track) -> Unit,
-    onRequestAddToPlaylist: (Track) -> Unit,
+    onOpenTrackMenu: (Track) -> Unit,
 ) {
     val palette = LocalCroixPalette.current
     if (tracks.isEmpty()) {
-        CroixGlassCard(modifier = Modifier.fillMaxWidth(), hazeState = hazeState) {
+        CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
             Text(emptyText, color = palette.textSecondary, modifier = Modifier.padding(18.dp))
         }
         return
@@ -490,7 +481,6 @@ private fun TrackListSection(
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
         CroixGlassCard(
             modifier = Modifier.weight(1f),
-            hazeState = hazeState,
             accentTint = palette.primary,
             onClick = { onPlayTrack(tracks.first(), tracks) },
         ) {
@@ -506,7 +496,6 @@ private fun TrackListSection(
         }
         CroixGlassCard(
             modifier = Modifier.weight(1f),
-            hazeState = hazeState,
             onClick = {
                 val s = tracks.shuffled()
                 onPlayTrack(s.first(), s)
@@ -533,11 +522,9 @@ private fun TrackListSection(
                 isFavorite = track.id in favIds,
                 isDownloaded = track.id in downloadedIds,
                 downloadingProgress = downloadProgress[track.id],
-                hazeState = hazeState,
                 onPlay = { onPlayTrack(track, tracks) },
                 onToggleFavorite = { onToggleFavorite(track) },
-                onDownload = { onDownloadTrack(track) },
-                onAddToPlaylist = { onRequestAddToPlaylist(track) },
+                onOpenMenu = { onOpenTrackMenu(track) },
             )
         }
     }
@@ -549,18 +536,15 @@ fun GlassTrackRow(
     isFavorite: Boolean,
     isDownloaded: Boolean,
     downloadingProgress: Float?,
-    hazeState: HazeState,
     onPlay: () -> Unit,
     onToggleFavorite: () -> Unit,
-    onDownload: () -> Unit,
-    onAddToPlaylist: () -> Unit,
+    onOpenMenu: () -> Unit,
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
 
     CroixGlassCard(
         modifier = Modifier.fillMaxWidth(),
-        hazeState = hazeState,
         onClick = onPlay,
     ) {
         Row(
@@ -588,39 +572,40 @@ fun GlassTrackRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = track.artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = palette.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    if (isDownloaded) {
+                        Icon(Icons.Rounded.CheckCircle, null, tint = palette.primary, modifier = Modifier.size(13.dp))
+                    }
+                    Text(
+                        text = track.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (downloadingProgress != null) {
                 CircularProgressIndicator(
                     progress = { downloadingProgress },
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
                     color = palette.primary,
                 )
-            } else {
-                IconButton(onClick = onDownload, modifier = Modifier.size(34.dp)) {
-                    Icon(
-                        imageVector = if (isDownloaded) Icons.Rounded.CheckCircle else Icons.Rounded.Download,
-                        contentDescription = "Download offline",
-                        tint = if (isDownloaded) palette.primary else palette.textSecondary,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
             }
-            IconButton(onClick = onAddToPlaylist, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.Rounded.PlaylistAdd, contentDescription = "Add to playlist", tint = palette.textSecondary, modifier = Modifier.size(20.dp))
-            }
-            IconButton(onClick = onToggleFavorite, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp)) {
                 Icon(
                     imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                     contentDescription = "Favorite",
                     tint = if (isFavorite) palette.primary else palette.textSecondary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            IconButton(onClick = onOpenMenu, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    imageVector = Icons.Rounded.MoreVert,
+                    contentDescription = "Track Options",
+                    tint = palette.textSecondary,
                     modifier = Modifier.size(20.dp),
                 )
             }

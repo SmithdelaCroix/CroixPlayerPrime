@@ -23,6 +23,14 @@ data class HomeSection(
 )
 
 @Serializable
+data class ArtistProfile(
+    val name: String,
+    val avatarUrl: String,
+    val topTracks: List<Track>,
+    val relatedTracks: List<Track> = emptyList(),
+)
+
+@Serializable
 data class MoodChip(
     val title: String,
     val query: String,

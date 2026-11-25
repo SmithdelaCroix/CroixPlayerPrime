@@ -10,10 +10,13 @@ import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.croix.prime.engine.InnerTubeClient
@@ -51,10 +54,12 @@ data class PlaybackUiState(
     val currentIndex: Int = -1,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
-    val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,
     val repeatOne: Boolean = false,
+    val playbackSpeed: Float = 1.0f,
+    val playbackPitch: Float = 1.0f,
+    val skipSilenceEnabled: Boolean = false,
     val sponsorSegments: List<SponsorSegment> = emptyList(),
     val lastSkippedNotice: String? = null,
     val sleepTimerRemainingSec: Int = 0,
@@ -78,6 +83,10 @@ class CroixPlayerController(
 
     private val _state = MutableStateFlow(PlaybackUiState())
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
+
+    // Separated high-frequency playback position so root screens NEVER recompose every 350ms!
+    private val _positionMs = MutableStateFlow(0L)
+    val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
 
     private var controller: MediaController? = null
     private var playJob: Job? = null
@@ -127,9 +136,13 @@ class CroixPlayerController(
                 val mc = controller
                 if (mc != null && _state.value.currentTrack != null) {
                     val pos = mc.currentPosition.coerceAtLeast(0L)
+                    _positionMs.value = pos
+
                     val dur = mc.duration.takeIf { it > 0L }
                         ?: ((_state.value.currentTrack?.durationSeconds ?: 0) * 1000L)
-                    _state.update { it.copy(positionMs = pos, durationMs = dur) }
+                    if (dur != _state.value.durationMs) {
+                        _state.update { it.copy(durationMs = dur) }
+                    }
 
                     val segs = _state.value.sponsorSegments
                     if (segs.isNotEmpty() && mc.isPlaying) {
@@ -142,6 +155,7 @@ class CroixPlayerController(
                         if (hit != null) {
                             skippedUuids += hit.uuid
                             mc.seekTo(hit.endMs)
+                            _positionMs.value = hit.endMs
                             _state.update { it.copy(lastSkippedNotice = "SponsorBlock skipped ${hit.category.replace('_', ' ')}") }
                             scope.launch {
                                 delay(3_000L)
@@ -158,13 +172,13 @@ class CroixPlayerController(
     fun playTrack(track: Track, newQueue: List<Track> = listOf(track), autoFetchRadio: Boolean = true) {
         val queueList = if (newQueue.any { it.id == track.id }) newQueue else listOf(track) + newQueue
         val idx = queueList.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+        _positionMs.value = 0L
         _state.update {
             it.copy(
                 currentTrack = track,
                 queue = queueList,
                 currentIndex = idx,
                 isBuffering = true,
-                positionMs = 0L,
                 durationMs = track.durationSeconds * 1000L,
                 sponsorSegments = emptyList(),
                 errorMessage = null,
@@ -185,16 +199,46 @@ class CroixPlayerController(
         }
     }
 
+    fun playNext(track: Track) {
+        val cur = _state.value
+        if (cur.currentTrack == null) {
+            playTrack(track)
+            return
+        }
+        val list = cur.queue.toMutableList()
+        val insertAt = (cur.currentIndex + 1).coerceIn(0, list.size)
+        list.add(insertAt, track)
+        _state.update { it.copy(queue = list) }
+    }
+
+    fun addToQueue(track: Track) {
+        val cur = _state.value
+        if (cur.currentTrack == null) {
+            playTrack(track)
+            return
+        }
+        _state.update { it.copy(queue = it.queue + track) }
+    }
+
+    fun removeFromQueue(index: Int) {
+        val cur = _state.value
+        if (index !in cur.queue.indices || index == cur.currentIndex) return
+        val list = cur.queue.toMutableList()
+        list.removeAt(index)
+        val adjustedIdx = if (index < cur.currentIndex) cur.currentIndex - 1 else cur.currentIndex
+        _state.update { it.copy(queue = list, currentIndex = adjustedIdx) }
+    }
+
     fun playAtIndex(index: Int) {
         val list = _state.value.queue
         if (index !in list.indices) return
         val track = list[index]
+        _positionMs.value = 0L
         _state.update {
             it.copy(
                 currentTrack = track,
                 currentIndex = index,
                 isBuffering = true,
-                positionMs = 0L,
                 durationMs = track.durationSeconds * 1000L,
                 sponsorSegments = emptyList(),
                 errorMessage = null,
@@ -203,6 +247,7 @@ class CroixPlayerController(
         startPlayingInternal(track)
     }
 
+    @OptIn(UnstableApi::class)
     private fun startPlayingInternal(track: Track) {
         playJob?.cancel()
         skippedUuids.clear()
@@ -216,7 +261,6 @@ class CroixPlayerController(
                 }
             }
 
-            // Offline-first playback: if track is downloaded, play straight from local file!
             val offlineFile = localFileProvider(track.id)
             val uriToPlay: Result<Uri> = if (offlineFile != null) {
                 _state.update { it.copy(isPlayingOfflineFile = true) }
@@ -240,6 +284,8 @@ class CroixPlayerController(
                     .setMediaMetadata(metadata)
                     .build()
                 mc.setMediaItem(mediaItem)
+                mc.setPlaybackParameters(PlaybackParameters(_state.value.playbackSpeed, _state.value.playbackPitch))
+                CroixAudioSessionBridge.exoPlayerRef?.skipSilenceEnabled = _state.value.skipSilenceEnabled
                 mc.prepare()
                 mc.play()
                 applyAudioEffects()
@@ -263,11 +309,11 @@ class CroixPlayerController(
         val dur = _state.value.durationMs
         val clamped = if (dur > 0L) positionMs.coerceIn(0L, dur) else positionMs.coerceAtLeast(0L)
         controller?.seekTo(clamped)
-        _state.update { it.copy(positionMs = clamped) }
+        _positionMs.value = clamped
     }
 
     fun seekRelative(deltaMs: Long) {
-        seekTo(_state.value.positionMs + deltaMs)
+        seekTo(_positionMs.value + deltaMs)
     }
 
     fun seekToFraction(fraction: Float) {
@@ -287,11 +333,11 @@ class CroixPlayerController(
     }
 
     fun skipPrevious() {
-        val s = _state.value
-        if (s.positionMs > 3_500L) {
+        if (_positionMs.value > 3_500L) {
             seekTo(0L)
             return
         }
+        val s = _state.value
         if (s.queue.isEmpty()) return
         val prev = if (s.currentIndex > 0) s.currentIndex - 1 else s.queue.lastIndex
         playAtIndex(prev)
@@ -300,6 +346,24 @@ class CroixPlayerController(
     fun toggleShuffle() = _state.update { it.copy(shuffleEnabled = !it.shuffleEnabled) }
     fun toggleRepeatOne() = _state.update { it.copy(repeatOne = !it.repeatOne) }
 
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.5f, 2.0f)
+        _state.update { it.copy(playbackSpeed = clamped) }
+        controller?.setPlaybackParameters(PlaybackParameters(clamped, _state.value.playbackPitch))
+    }
+
+    fun setPlaybackPitch(pitch: Float) {
+        val clamped = pitch.coerceIn(0.5f, 2.0f)
+        _state.update { it.copy(playbackPitch = clamped) }
+        controller?.setPlaybackParameters(PlaybackParameters(_state.value.playbackSpeed, clamped))
+    }
+
+    @OptIn(UnstableApi::class)
+    fun setSkipSilence(enabled: Boolean) {
+        _state.update { it.copy(skipSilenceEnabled = enabled) }
+        runCatching { CroixAudioSessionBridge.exoPlayerRef?.skipSilenceEnabled = enabled }
+    }
+
     fun setEqEnabled(enabled: Boolean) {
         _state.update { it.copy(eqEnabled = enabled) }
         applyAudioEffects()
@@ -307,11 +371,7 @@ class CroixPlayerController(
 
     fun applyEqPreset(preset: EqPreset) {
         _state.update {
-            it.copy(
-                eqEnabled = true,
-                eqPreset = preset,
-                eqBandsDb = preset.bandsDb,
-            )
+            it.copy(eqEnabled = true, eqPreset = preset, eqBandsDb = preset.bandsDb)
         }
         applyAudioEffects()
     }
@@ -319,9 +379,7 @@ class CroixPlayerController(
     fun setEqBand(bandIndex: Int, gainDb: Float) {
         _state.update { cur ->
             val updated = cur.eqBandsDb.toMutableList()
-            if (bandIndex in updated.indices) {
-                updated[bandIndex] = gainDb.coerceIn(-12f, 12f)
-            }
+            if (bandIndex in updated.indices) updated[bandIndex] = gainDb.coerceIn(-12f, 12f)
             cur.copy(eqEnabled = true, eqPreset = EqPreset.CUSTOM, eqBandsDb = updated)
         }
         applyAudioEffects()

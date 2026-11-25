@@ -58,7 +58,6 @@ fun HomeScreen(
     recentTracks: List<Track>,
     moods: List<MoodChip>,
     isLoading: Boolean,
-    hazeState: HazeState,
     bottomPaddingDp: Int,
     onPlayFlow: () -> Unit,
     onPlayMood: (MoodChip) -> Unit,
@@ -95,7 +94,6 @@ fun HomeScreen(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CroixGlassCard(
-                        hazeState = hazeState,
                         cornerRadius = 50.dp,
                         onClick = onRefresh,
                     ) {
@@ -104,7 +102,6 @@ fun HomeScreen(
                         }
                     }
                     CroixGlassCard(
-                        hazeState = hazeState,
                         cornerRadius = 50.dp,
                         accentTint = palette.primary,
                         onClick = onOpenSettings,
@@ -125,7 +122,6 @@ fun HomeScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp)
                         .height(168.dp),
-                    hazeState = hazeState,
                     accentTint = palette.primary,
                     onClick = onPlayFlow,
                 ) {
@@ -220,7 +216,6 @@ fun HomeScreen(
                     ) {
                         items(moods) { mood ->
                             CroixGlassCard(
-                                hazeState = hazeState,
                                 cornerRadius = 50.dp,
                                 accentTint = Color(mood.accentHex),
                                 onClick = { onPlayMood(mood) },
@@ -272,7 +267,6 @@ fun HomeScreen(
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(60.dp),
-                                    hazeState = hazeState,
                                     cornerRadius = 14.dp,
                                     onClick = { onPlayTrack(track, recentTracks) },
                                 ) {
@@ -325,7 +319,6 @@ fun HomeScreen(
                 title = section.title,
                 tracks = section.tracks,
                 cardSize = cardSize,
-                hazeState = hazeState,
                 onPlayTrack = { t -> onPlayTrack(t, section.tracks) },
             )
         }
@@ -337,7 +330,6 @@ private fun EditorialTrackCarousel(
     title: String,
     tracks: List<Track>,
     cardSize: androidx.compose.ui.unit.Dp,
-    hazeState: HazeState,
     onPlayTrack: (Track) -> Unit,
 ) {
     val design = LocalCroixDesign.current
@@ -357,7 +349,6 @@ private fun EditorialTrackCarousel(
             items(tracks, key = { it.id }) { track ->
                 CroixGlassCard(
                     modifier = Modifier.width(cardSize),
-                    hazeState = hazeState,
                     onClick = { onPlayTrack(track) },
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {

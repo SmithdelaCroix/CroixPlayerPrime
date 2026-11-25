@@ -19,6 +19,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -30,12 +31,19 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AddToQueue
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,11 +56,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.croix.player.prime.ui.CroixPrimeViewModel
+import com.croix.player.prime.ui.screens.ArtistProfileOverlay
 import com.croix.player.prime.ui.screens.FavoritesScreen
 import com.croix.player.prime.ui.screens.HomeScreen
 import com.croix.player.prime.ui.screens.MiniPlayerBar
@@ -104,20 +114,22 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val lyricsLoading by vm.lyricsLoading.collectAsState()
     val albumPrimary by vm.albumPrimary.collectAsState()
     val albumSecondary by vm.albumSecondary.collectAsState()
+    val artistProfile by vm.artistProfile.collectAsState()
+    val artistLoading by vm.artistLoading.collectAsState()
 
     var currentRoute by remember { mutableStateOf("home") }
     var playerExpanded by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var trackForMenu by remember { mutableStateOf<Track?>(null) }
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var quickNewPlaylistName by remember { mutableStateOf("") }
 
-    val backdropHazeState = remember { HazeState() }
+    // SINGLE HazeState strictly for the floating MiniPlayerBar & NavBar (120fps zero-lag!)
     val contentHazeState = remember { HazeState() }
 
     val favoriteIds = remember(favorites) { favorites.map { it.id }.toSet() }
     val downloadedIds = remember(downloads) { downloads.map { it.id }.toSet() }
 
-    // Clean 3-tab bottom bar (Settings & Studio live in the Top-Right Gear Icon!)
     val destinations = remember {
         listOf(
             CroixNavDestination("home", "Home", Icons.Rounded.Home),
@@ -148,9 +160,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     .fillMaxSize()
                     .hazeSource(state = contentHazeState),
             ) {
-                CroixAnimatedBackdrop(
-                    modifier = Modifier.hazeSource(state = backdropHazeState),
-                )
+                CroixAnimatedBackdrop()
 
                 Box(
                     modifier = Modifier
@@ -163,7 +173,6 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                             recentTracks = history,
                             moods = vm.moods,
                             isLoading = homeLoading,
-                            hazeState = backdropHazeState,
                             bottomPaddingDp = bottomClearance,
                             onPlayFlow = vm::startCroixFlow,
                             onPlayMood = vm::playMood,
@@ -178,13 +187,11 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                             downloadedIds = downloadedIds,
                             downloadProgress = downloadProgress,
                             isLoading = searchLoading,
-                            hazeState = backdropHazeState,
                             bottomPaddingDp = bottomClearance,
                             onQueryChange = vm::onSearchQueryChange,
                             onPlayTrack = vm::playTrack,
                             onToggleFavorite = vm::toggleFavorite,
-                            onDownloadTrack = vm::downloadTrack,
-                            onRequestAddToPlaylist = { trackForPlaylistDialog = it },
+                            onOpenTrackMenu = { trackForMenu = it },
                             onOpenSettings = { settingsOpen = true },
                         )
                         "favorites" -> FavoritesScreen(
@@ -194,35 +201,60 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                             playlistTracks = playlistTracks,
                             stats = stats,
                             downloadProgress = downloadProgress,
-                            hazeState = backdropHazeState,
                             bottomPaddingDp = bottomClearance,
                             onPlayTrack = vm::playTrack,
                             onToggleFavorite = vm::toggleFavorite,
-                            onDownloadTrack = vm::downloadTrack,
                             onDeleteDownload = vm::deleteDownload,
                             onCreatePlaylist = vm::createPlaylist,
                             onDeletePlaylist = vm::deletePlaylist,
-                            onRequestAddToPlaylist = { trackForPlaylistDialog = it },
+                            onOpenTrackMenu = { trackForMenu = it },
+                            onOpenArtist = vm::openArtist,
                             onOpenSettings = { settingsOpen = true },
                         )
                     }
                 }
             }
 
-            // Floating Mini-Player + 3-Tab Glass NavBar (hidden cleanly during IME, Player, or Settings)
+            // Artist Profile Overlay
+            AnimatedVisibility(
+                visible = artistProfile != null && !playerExpanded && !settingsOpen,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 4 }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 4 }),
+                modifier = Modifier.zIndex(4f),
+            ) {
+                val prof = artistProfile
+                if (prof != null) {
+                    BackHandler { vm.closeArtist() }
+                    ArtistProfileOverlay(
+                        profile = prof,
+                        isLoading = artistLoading,
+                        favoriteIds = favoriteIds,
+                        downloadedIds = downloadedIds,
+                        downloadProgress = downloadProgress,
+                        bottomPaddingDp = bottomClearance,
+                        onClose = vm::closeArtist,
+                        onPlayTrack = vm::playTrack,
+                        onToggleFavorite = vm::toggleFavorite,
+                        onOpenTrackMenu = { trackForMenu = it },
+                    )
+                }
+            }
+
+            // Floating Mini-Player + 3-Tab Glass NavBar (the ONLY real Haze blur targets -> 120fps!)
             AnimatedVisibility(
                 visible = !playerExpanded && !settingsOpen && !isKeyboardOpen,
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
                 exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .zIndex(5f)
+                    .zIndex(6f)
                     .navigationBarsPadding(),
             ) {
                 Column {
                     if (playback.currentTrack != null) {
                         MiniPlayerBar(
                             playback = playback,
+                            positionMsFlow = vm.positionMs,
                             hazeState = contentHazeState,
                             onExpand = { playerExpanded = true },
                             onTogglePlay = vm.playerController::togglePlayPause,
@@ -234,7 +266,10 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                         destinations = destinations,
                         currentRoute = currentRoute,
                         hazeState = contentHazeState,
-                        onSelect = { currentRoute = it },
+                        onSelect = {
+                            vm.closeArtist()
+                            currentRoute = it
+                        },
                     )
                 }
             }
@@ -249,6 +284,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 BackHandler { playerExpanded = false }
                 NowPlayingOverlay(
                     playback = playback,
+                    positionMsFlow = vm.positionMs,
                     lyrics = lyrics,
                     lyricsLoading = lyricsLoading,
                     isFavorite = playback.currentTrack?.id in favoriteIds,
@@ -266,8 +302,16 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onToggleFavorite = vm::toggleFavorite,
                     onDownloadTrack = vm::downloadTrack,
                     onRequestAddToPlaylist = { trackForPlaylistDialog = it },
+                    onOpenArtist = { artist ->
+                        playerExpanded = false
+                        vm.openArtist(artist)
+                    },
                     onSelectQueueIndex = vm.playerController::playAtIndex,
+                    onRemoveQueueIndex = vm.playerController::removeFromQueue,
                     onSetSleepTimer = vm.playerController::startSleepTimer,
+                    onSetSpeed = vm.playerController::setPlaybackSpeed,
+                    onSetPitch = vm.playerController::setPlaybackPitch,
+                    onSetSkipSilence = vm.playerController::setSkipSilence,
                     onSetEqEnabled = vm.playerController::setEqEnabled,
                     onApplyEqPreset = vm.playerController::applyEqPreset,
                     onSetEqBand = vm.playerController::setEqBand,
@@ -277,7 +321,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 )
             }
 
-            // Top-Right Settings & Croix Studio Overlay
+            // Top-Right Settings Overlay (with Appearance & Studio as a clean submenu!)
             AnimatedVisibility(
                 visible = settingsOpen,
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it / 3 }),
@@ -290,11 +334,52 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onClose = { settingsOpen = false },
                     onUpdateDesign = vm::updateDesign,
                     onApplyPreset = vm::applyPreset,
+                    onSetSpeed = vm.playerController::setPlaybackSpeed,
+                    onSetPitch = vm.playerController::setPlaybackPitch,
+                    onSetSkipSilence = vm.playerController::setSkipSilence,
                     onSetEqEnabled = vm.playerController::setEqEnabled,
                     onApplyEqPreset = vm.playerController::applyEqPreset,
                     onSetEqBand = vm.playerController::setEqBand,
+                    onSetBassBoost = vm.playerController::setBassBoost,
+                    onSetLoudness = vm.playerController::setLoudnessGain,
                 )
             }
+        }
+
+        // Quick Track Action Menu (⋮)
+        val menuTrack = trackForMenu
+        if (menuTrack != null) {
+            AlertDialog(
+                onDismissRequest = { trackForMenu = null },
+                title = { Text(menuTrack.title, maxLines = 1) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TrackActionItem(Icons.Rounded.QueuePlayNext, "Play Next") {
+                            vm.playerController.playNext(menuTrack)
+                            trackForMenu = null
+                        }
+                        TrackActionItem(Icons.Rounded.AddToQueue, "Add to Queue") {
+                            vm.playerController.addToQueue(menuTrack)
+                            trackForMenu = null
+                        }
+                        TrackActionItem(Icons.Rounded.Person, "Go to Artist (${menuTrack.artist})") {
+                            trackForMenu = null
+                            vm.openArtist(menuTrack.artist)
+                        }
+                        TrackActionItem(Icons.Rounded.Download, "Download Offline") {
+                            vm.downloadTrack(menuTrack)
+                            trackForMenu = null
+                        }
+                        TrackActionItem(Icons.Rounded.PlaylistAdd, "Add to Playlist") {
+                            trackForMenu = null
+                            trackForPlaylistDialog = menuTrack
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { trackForMenu = null }) { Text("Close") }
+                },
+            )
         }
 
         // Add-to-Playlist Dialog
@@ -339,6 +424,20 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     TextButton(onClick = { trackForPlaylistDialog = null }) { Text("Close") }
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun TrackActionItem(icon: ImageVector, label: String, onClick: () -> Unit) {
+    CroixGlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 12.dp, onClick = onClick) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, tint = Color.White)
+            Spacer(Modifier.width(12.dp))
+            Text(label, color = Color.White, fontWeight = FontWeight.Medium)
         }
     }
 }

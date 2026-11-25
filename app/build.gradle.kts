@@ -30,8 +30,8 @@ android {
         applicationId = "com.croix.player.prime"
         minSdk = 31
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.1.0-prime"
+        versionCode = 4
+        versionName = "2.2.0-prime"
     }
 
     splits {

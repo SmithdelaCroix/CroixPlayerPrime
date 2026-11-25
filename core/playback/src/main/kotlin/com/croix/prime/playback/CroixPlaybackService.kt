@@ -45,6 +45,7 @@ class CroixPlaybackService : MediaSessionService() {
         player = exo
         mediaSession = MediaSession.Builder(this, exo).build()
         CroixAudioSessionBridge.currentAudioSessionId = exo.audioSessionId
+        CroixAudioSessionBridge.exoPlayerRef = exo
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -57,6 +58,7 @@ class CroixPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        CroixAudioSessionBridge.exoPlayerRef = null
         mediaSession?.run {
             player.release()
             release()
@@ -70,4 +72,7 @@ class CroixPlaybackService : MediaSessionService() {
 object CroixAudioSessionBridge {
     @Volatile
     var currentAudioSessionId: Int = 0
+
+    @Volatile
+    var exoPlayerRef: ExoPlayer? = null
 }

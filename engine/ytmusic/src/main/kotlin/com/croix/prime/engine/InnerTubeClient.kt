@@ -109,6 +109,21 @@ class InnerTubeClient(
         }.getOrElse { emptyList() }
     }
 
+    suspend fun fetchArtistProfile(artistName: String): ArtistProfile = withContext(Dispatchers.IO) {
+        val clean = artistName.split(",", "&", "feat.", "ft.", ignoreCase = true).firstOrNull()?.trim()
+            ?.ifBlank { artistName } ?: artistName
+        val tracks = searchSongs(clean, limit = 24)
+        val exactTracks = tracks.filter { it.artist.contains(clean, ignoreCase = true) }
+        val top = if (exactTracks.size >= 4) exactTracks else tracks
+        val related = tracks.filterNot { t -> top.any { it.id == t.id } }
+        ArtistProfile(
+            name = clean,
+            avatarUrl = top.firstOrNull()?.thumbnailUrl.orEmpty(),
+            topTracks = top.take(15),
+            relatedTracks = related.take(10),
+        )
+    }
+
     suspend fun fetchRadioQueue(videoId: String, limit: Int = 20): List<Track> = withContext(Dispatchers.IO) {
         runCatching {
             val payload = buildWebRemixContext {

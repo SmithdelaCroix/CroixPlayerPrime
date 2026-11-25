@@ -42,6 +42,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Equalizer
@@ -71,6 +72,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -106,11 +108,13 @@ import com.croix.prime.engine.Track
 import com.croix.prime.playback.EqPreset
 import com.croix.prime.playback.PlaybackUiState
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
 
 @Composable
 fun MiniPlayerBar(
     playback: PlaybackUiState,
+    positionMsFlow: StateFlow<Long>,
     hazeState: HazeState,
     onExpand: () -> Unit,
     onTogglePlay: () -> Unit,
@@ -120,9 +124,6 @@ fun MiniPlayerBar(
     val track = playback.currentTrack ?: return
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
-    val progress = if (playback.durationMs > 0L) {
-        (playback.positionMs.toFloat() / playback.durationMs.toFloat()).coerceIn(0f, 1f)
-    } else 0f
 
     val hPad = if (design.miniPlayerFloating) 16.dp else 0.dp
     val corner = if (design.miniPlayerFloating) design.cornerRadiusDp.dp else 0.dp
@@ -191,21 +192,38 @@ fun MiniPlayerBar(
                     Icon(Icons.Rounded.SkipNext, contentDescription = "Next", tint = Color.White)
                 }
             }
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.5.dp),
-                color = palette.primary,
-                trackColor = Color.White.copy(alpha = 0.12f),
+            // Isolated progress collector so only this 2.5dp line recomposes every 350ms!
+            MiniPlayerProgressLine(
+                positionMsFlow = positionMsFlow,
+                durationMs = playback.durationMs,
+                accent = palette.primary,
             )
         }
     }
 }
 
 @Composable
+private fun MiniPlayerProgressLine(
+    positionMsFlow: StateFlow<Long>,
+    durationMs: Long,
+    accent: Color,
+) {
+    val pos by positionMsFlow.collectAsState()
+    val progress = if (durationMs > 0L) (pos.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    LinearProgressIndicator(
+        progress = { progress },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(2.5.dp),
+        color = accent,
+        trackColor = Color.White.copy(alpha = 0.12f),
+    )
+}
+
+@Composable
 fun NowPlayingOverlay(
     playback: PlaybackUiState,
+    positionMsFlow: StateFlow<Long>,
     lyrics: LyricsResult?,
     lyricsLoading: Boolean,
     isFavorite: Boolean,
@@ -223,8 +241,13 @@ fun NowPlayingOverlay(
     onToggleFavorite: (Track) -> Unit,
     onDownloadTrack: (Track) -> Unit,
     onRequestAddToPlaylist: (Track) -> Unit,
+    onOpenArtist: (String) -> Unit,
     onSelectQueueIndex: (Int) -> Unit,
+    onRemoveQueueIndex: (Int) -> Unit,
     onSetSleepTimer: (Int) -> Unit,
+    onSetSpeed: (Float) -> Unit,
+    onSetPitch: (Float) -> Unit,
+    onSetSkipSilence: (Boolean) -> Unit,
     onSetEqEnabled: (Boolean) -> Unit,
     onApplyEqPreset: (EqPreset) -> Unit,
     onSetEqBand: (Int, Float) -> Unit,
@@ -235,7 +258,7 @@ fun NowPlayingOverlay(
     val track = playback.currentTrack ?: return
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
-    var activePanel by remember { mutableIntStateOf(0) } // 0=Player, 1=Lyrics, 2=Queue, 3=EQ & Sleep
+    var activePanel by remember { mutableIntStateOf(0) } // 0=Player, 1=Lyrics, 2=Queue, 3=EQ/Speed/Sleep
     var carMode by remember { mutableStateOf(false) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
 
@@ -246,10 +269,6 @@ fun NowPlayingOverlay(
         animationSpec = infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Restart),
         label = "angle",
     )
-
-    val progress = if (playback.durationMs > 0L) {
-        (playback.positionMs.toFloat() / playback.durationMs.toFloat()).coerceIn(0f, 1f)
-    } else 0f
 
     val touchBlocker = remember { MutableInteractionSource() }
 
@@ -271,13 +290,14 @@ fun NowPlayingOverlay(
             .background(palette.background)
             .clickable(interactionSource = touchBlocker, indication = null) {},
     ) {
+        // Static artwork blurred backdrop (never recomposes during playback ticks!)
         AsyncImage(
             model = track.thumbnailUrl,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxSize()
-                .blur(if (activePanel == 1) design.lyricsBackdropBlurDp.dp else (design.glassBlurDp + 8f).dp),
+                .blur(if (activePanel == 1) design.lyricsBackdropBlurDp.dp else (design.glassBlurDp + 6f).dp),
         )
         Box(
             modifier = Modifier
@@ -428,17 +448,21 @@ fun NowPlayingOverlay(
                     1 -> SyncedLyricsPanel(
                         lyrics = lyrics,
                         isLoading = lyricsLoading,
-                        positionMs = playback.positionMs,
+                        positionMsFlow = positionMsFlow,
                         onSeekMs = onSeekMs,
                     )
                     2 -> QueuePanel(
                         queue = playback.queue,
                         currentIndex = playback.currentIndex,
                         onSelect = onSelectQueueIndex,
+                        onRemove = onRemoveQueueIndex,
                     )
                     3 -> EqualizerAndSleepPanel(
                         playback = playback,
                         onSetSleepTimer = onSetSleepTimer,
+                        onSetSpeed = onSetSpeed,
+                        onSetPitch = onSetPitch,
+                        onSetSkipSilence = onSetSkipSilence,
                         onSetEqEnabled = onSetEqEnabled,
                         onApplyEqPreset = onApplyEqPreset,
                         onSetEqBand = onSetEqBand,
@@ -475,9 +499,10 @@ fun NowPlayingOverlay(
                             Text(
                                 text = track.artist,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = palette.textSecondary,
+                                color = palette.primary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.clickable { onOpenArtist(track.artist) },
                             )
                         }
                         if (downloadProgress != null) {
@@ -508,15 +533,12 @@ fun NowPlayingOverlay(
                         }
                     }
 
-                    CroixSeekBar(progress = progress, onSeek = onSeekFraction)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(formatTime(playback.positionMs), style = MaterialTheme.typography.bodySmall, color = palette.textSecondary)
-                        Text(formatTime(playback.durationMs), style = MaterialTheme.typography.bodySmall, color = palette.textSecondary)
-                    }
+                    // Isolated SeekBar + Timestamps (only this small block recomposes on playback ticks!)
+                    NowPlayingSeekSection(
+                        positionMsFlow = positionMsFlow,
+                        durationMs = playback.durationMs,
+                        onSeekFraction = onSeekFraction,
+                    )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -537,7 +559,10 @@ fun NowPlayingOverlay(
                             modifier = Modifier
                                 .size(62.dp)
                                 .clip(CircleShape)
-                                .background(Brush.linearGradient(listOf(palette.primary, palette.secondary)))
+                                .background(
+                                    if (design.useGradientStyle) Brush.linearGradient(listOf(palette.primary, palette.secondary))
+                                    else Brush.linearGradient(listOf(palette.primary, palette.primary)),
+                                )
                                 .clickable(onClick = onTogglePlay),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -570,13 +595,33 @@ fun NowPlayingOverlay(
                         PanelToggleIcon(Icons.Rounded.QueueMusic, "Queue", activePanel == 2) {
                             activePanel = if (activePanel == 2) 0 else 2
                         }
-                        PanelToggleIcon(Icons.Rounded.Equalizer, "EQ & Sleep", activePanel == 3) {
+                        PanelToggleIcon(Icons.Rounded.Equalizer, "Audio", activePanel == 3) {
                             activePanel = if (activePanel == 3) 0 else 3
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun NowPlayingSeekSection(
+    positionMsFlow: StateFlow<Long>,
+    durationMs: Long,
+    onSeekFraction: (Float) -> Unit,
+) {
+    val palette = LocalCroixPalette.current
+    val pos by positionMsFlow.collectAsState()
+    val progress = if (durationMs > 0L) (pos.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+
+    CroixSeekBar(progress = progress, onSeek = onSeekFraction)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(formatTime(pos), style = MaterialTheme.typography.bodySmall, color = palette.textSecondary)
+        Text(formatTime(durationMs), style = MaterialTheme.typography.bodySmall, color = palette.textSecondary)
     }
 }
 
@@ -668,11 +713,12 @@ private fun PanelToggleIcon(
 private fun SyncedLyricsPanel(
     lyrics: LyricsResult?,
     isLoading: Boolean,
-    positionMs: Long,
+    positionMsFlow: StateFlow<Long>,
     onSeekMs: (Long) -> Unit,
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
+    val positionMs by positionMsFlow.collectAsState()
     val align = when (design.lyricsAlign) {
         PrimeLyricsAlign.START -> TextAlign.Start
         PrimeLyricsAlign.CENTER -> TextAlign.Center
@@ -737,6 +783,7 @@ private fun QueuePanel(
     queue: List<Track>,
     currentIndex: Int,
     onSelect: (Int) -> Unit,
+    onRemove: (Int) -> Unit,
 ) {
     val palette = LocalCroixPalette.current
     LazyColumn(
@@ -764,6 +811,11 @@ private fun QueuePanel(
                         Text(t.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(t.artist, color = palette.textSecondary, fontSize = 12.sp, maxLines = 1)
                     }
+                    if (idx != currentIndex) {
+                        IconButton(onClick = { onRemove(idx) }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Remove", tint = palette.textSecondary, modifier = Modifier.size(18.dp))
+                        }
+                    }
                 }
             }
         }
@@ -774,6 +826,9 @@ private fun QueuePanel(
 private fun EqualizerAndSleepPanel(
     playback: PlaybackUiState,
     onSetSleepTimer: (Int) -> Unit,
+    onSetSpeed: (Float) -> Unit,
+    onSetPitch: (Float) -> Unit,
+    onSetSkipSilence: (Boolean) -> Unit,
     onSetEqEnabled: (Boolean) -> Unit,
     onApplyEqPreset: (EqPreset) -> Unit,
     onSetEqBand: (Int, Float) -> Unit,
@@ -791,8 +846,24 @@ private fun EqualizerAndSleepPanel(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            Text("Speed, Pitch & Skip Silence", color = palette.primary, fontWeight = FontWeight.Bold)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Speed", color = Color.White, fontSize = 13.sp)
+                Text("${"%.2f".format(playback.playbackSpeed)}x", color = palette.primary, fontSize = 13.sp)
+            }
+            Slider(value = playback.playbackSpeed, onValueChange = onSetSpeed, valueRange = 0.5f..2.0f)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Pitch", color = Color.White, fontSize = 13.sp)
+                Text("${"%.2f".format(playback.playbackPitch)}x", color = palette.primary, fontSize = 13.sp)
+            }
+            Slider(value = playback.playbackPitch, onValueChange = onSetPitch, valueRange = 0.5f..2.0f)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("5-Band Hardware Equalizer", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("Skip Silence", color = Color.White, fontSize = 13.sp)
+                Switch(checked = playback.skipSilenceEnabled, onCheckedChange = onSetSkipSilence)
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("5-Band Equalizer", color = palette.primary, fontWeight = FontWeight.Bold)
                 Switch(checked = playback.eqEnabled, onCheckedChange = onSetEqEnabled)
             }
             Row(

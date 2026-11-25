@@ -109,19 +109,258 @@ class InnerTubeClient(
         }.getOrElse { emptyList() }
     }
 
-    suspend fun fetchArtistProfile(artistName: String): ArtistProfile = withContext(Dispatchers.IO) {
-        val clean = artistName.split(",", "&", "feat.", "ft.", ignoreCase = true).firstOrNull()?.trim()
-            ?.ifBlank { artistName } ?: artistName
-        val tracks = searchSongs(clean, limit = 24)
-        val exactTracks = tracks.filter { it.artist.contains(clean, ignoreCase = true) }
-        val top = if (exactTracks.size >= 4) exactTracks else tracks
-        val related = tracks.filterNot { t -> top.any { it.id == t.id } }
+    suspend fun fetchArtistProfile(
+        artistName: String,
+        browseId: String? = null,
+    ): ArtistProfile = withContext(Dispatchers.IO) {
+        val cleanName = artistName.split(",", "&", "feat.", "ft.", ignoreCase = true)
+            .firstOrNull()?.trim()?.ifBlank { artistName } ?: artistName
+
+        // Step 1: Resolve exact YouTube Music Artist browseId (UC...) if not supplied
+        val resolvedBrowseId = browseId?.takeIf { it.isNotBlank() } ?: findArtistBrowseId(cleanName)
+
+        if (!resolvedBrowseId.isNullOrBlank()) {
+            val browsed = runCatching { fetchFullArtistPage(resolvedBrowseId, cleanName) }.getOrNull()
+            if (browsed != null && (browsed.topTracks.isNotEmpty() || browsed.albums.isNotEmpty() || browsed.singles.isNotEmpty())) {
+                return@withContext browsed
+            }
+        }
+
+        // Graceful fallback if artist has no standard YT Music channel page
+        val tracks = searchSongs(cleanName, limit = 20)
+        val exact = tracks.filter { it.artist.contains(cleanName, ignoreCase = true) }
+        val top = if (exact.size >= 4) exact else tracks
         ArtistProfile(
-            name = clean,
-            avatarUrl = top.firstOrNull()?.thumbnailUrl.orEmpty(),
-            topTracks = top.take(15),
-            relatedTracks = related.take(10),
+            browseId = resolvedBrowseId.orEmpty(),
+            name = cleanName,
+            bannerUrl = top.firstOrNull()?.thumbnailUrl.orEmpty(),
+            topTracks = top.take(10),
         )
+    }
+
+    suspend fun fetchAlbumDetail(summary: AlbumSummary): AlbumDetail = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = buildWebRemixContext {
+                put("browseId", summary.browseId)
+            }
+            val raw = postInnerTube("browse", payload)
+            val root = json.parseToJsonElement(raw).jsonObject
+
+            val header = findFirstObjectByKey(root, "musicResponsiveHeaderRenderer")
+                ?: findFirstObjectByKey(root, "musicDetailHeaderRenderer")
+
+            val title = header?.get("title")?.let(::extractColumnText).orEmpty().ifBlank { summary.title }
+            val subtitleRuns = header?.get("subtitle")?.let(::extractColumnRuns).orEmpty()
+            val strapRuns = header?.get("straplineTextOne")?.let(::extractColumnRuns).orEmpty()
+            val artist = strapRuns.firstOrNull { it.isNotBlank() }
+                ?: subtitleRuns.firstOrNull { it != " • " && !it.all(Char::isDigit) && !it.equals("Album", true) && !it.equals("Single", true) && !it.equals("EP", true) }
+                ?: "Artist"
+            val year = subtitleRuns.firstOrNull { it.length == 4 && it.all(Char::isDigit) } ?: summary.year
+            val thumb = upgradeThumbResolution(
+                extractBestThumbnail(header?.get("thumbnail")).ifBlank { summary.thumbnailUrl },
+            )
+
+            val rawTracks = extractTracksFromTree(root).distinctBy { it.id }.map { t ->
+                t.copy(
+                    artist = if (t.artist == "Unknown Artist" || t.artist.isBlank()) artist else t.artist,
+                    album = title,
+                    thumbnailUrl = t.thumbnailUrl.ifBlank { thumb },
+                )
+            }
+            AlbumDetail(
+                browseId = summary.browseId,
+                title = title,
+                artist = artist,
+                year = year,
+                thumbnailUrl = thumb,
+                tracks = rawTracks,
+            )
+        }.getOrElse {
+            AlbumDetail(
+                browseId = summary.browseId,
+                title = summary.title,
+                artist = "Artist",
+                year = summary.year,
+                thumbnailUrl = summary.thumbnailUrl,
+                tracks = searchSongs(summary.title, limit = 12),
+            )
+        }
+    }
+
+    private suspend fun findArtistBrowseId(artistName: String): String? {
+        return runCatching {
+            val payload = buildWebRemixContext {
+                put("query", artistName)
+                // Official YouTube Music Artists filter
+                put("params", "EgWKAQIgAWoKEAkQBRAKEAMQBA%3D%3D")
+            }
+            val raw = postInnerTube("search", payload)
+            val root = json.parseToJsonElement(raw).jsonObject
+            findFirstBrowseIdWithPrefix(root, "UC")
+        }.getOrNull()
+    }
+
+    private suspend fun fetchFullArtistPage(browseId: String, fallbackName: String): ArtistProfile {
+        val payload = buildWebRemixContext {
+            put("browseId", browseId)
+        }
+        val raw = postInnerTube("browse", payload)
+        val root = json.parseToJsonElement(raw).jsonObject
+
+        val header = findFirstObjectByKey(root, "musicImmersiveHeaderRenderer")
+            ?: findFirstObjectByKey(root, "musicVisualHeaderRenderer")
+
+        val name = header?.get("title")?.let(::extractColumnText).orEmpty().ifBlank { fallbackName }
+        val bannerRaw = extractBestThumbnail(header?.get("thumbnail"))
+        val bannerUrl = if (bannerRaw.isNotBlank()) upgradeBannerResolution(bannerRaw) else ""
+        val description = header?.get("description")?.let(::extractColumnText).orEmpty().trim()
+
+        val monthlyAudience = header?.get("monthlyListenerCount")?.let(::extractColumnText).orEmpty()
+        val subsText = header?.get("subscriptionButton")?.jsonObject
+            ?.get("subscribeButtonRenderer")?.jsonObject
+            ?.get("longSubscriberCountText")?.let(::extractColumnText).orEmpty()
+            .ifBlank {
+                header?.get("subscriptionButton")?.jsonObject
+                    ?.get("subscribeButtonRenderer")?.jsonObject
+                    ?.get("subscriberCountText")?.let(::extractColumnText).orEmpty()
+            }
+        val listenersLabel = monthlyAudience.ifBlank { subsText }
+
+        // Top Songs from musicShelfRenderer
+        val songsShelf = findFirstObjectByKey(root, "musicShelfRenderer")
+        val topTracks = songsShelf?.let { shelf ->
+            extractTracksFromTree(shelf).distinctBy { it.id }.map { t ->
+                t.copy(artist = if (t.artist == "Unknown Artist" || t.artist.isBlank()) name else t.artist)
+            }
+        }.orEmpty()
+
+        // Carousels: Albums, Singles & EPs, Fans might also like
+        val albums = mutableListOf<AlbumSummary>()
+        val singles = mutableListOf<AlbumSummary>()
+        val related = mutableListOf<RelatedArtist>()
+
+        val carousels = findAllObjectsByKey(root, "musicCarouselShelfRenderer")
+        carousels.forEach { shelf ->
+            val shelfTitle = shelf["header"]?.jsonObject
+                ?.get("musicCarouselShelfBasicHeaderRenderer")?.jsonObject
+                ?.get("title")?.let(::extractColumnText).orEmpty()
+            val lower = shelfTitle.lowercase()
+            val contents = shelf["contents"]?.jsonArray ?: return@forEach
+
+            when {
+                lower.contains("album") -> {
+                    contents.forEach { node ->
+                        node.jsonObject["musicTwoRowItemRenderer"]?.jsonObject?.let { item ->
+                            parseAlbumTwoRow(item, isSingle = false)?.let(albums::add)
+                        }
+                    }
+                }
+                lower.contains("single") || lower.contains("ep") -> {
+                    contents.forEach { node ->
+                        node.jsonObject["musicTwoRowItemRenderer"]?.jsonObject?.let { item ->
+                            parseAlbumTwoRow(item, isSingle = true)?.let(singles::add)
+                        }
+                    }
+                }
+                lower.contains("fan") || lower.contains("similar") || lower.contains("artist") -> {
+                    contents.forEach { node ->
+                        node.jsonObject["musicTwoRowItemRenderer"]?.jsonObject?.let { item ->
+                            parseRelatedArtistTwoRow(item)?.let(related::add)
+                        }
+                    }
+                }
+            }
+        }
+
+        // If artist page had songs hidden behind a shelf, fallback search for top tracks
+        val finalTracks = if (topTracks.isNotEmpty()) topTracks else searchSongs(name, limit = 10)
+
+        return ArtistProfile(
+            browseId = browseId,
+            name = name,
+            bannerUrl = bannerUrl.ifBlank { finalTracks.firstOrNull()?.thumbnailUrl.orEmpty() },
+            monthlyListeners = listenersLabel,
+            description = description,
+            topTracks = finalTracks.take(10),
+            albums = albums.distinctBy { it.browseId }.take(15),
+            singles = singles.distinctBy { it.browseId }.take(15),
+            relatedArtists = related.distinctBy { it.browseId }.take(12),
+        )
+    }
+
+    private fun parseAlbumTwoRow(item: JsonObject, isSingle: Boolean): AlbumSummary? {
+        val bid = item["navigationEndpoint"]?.jsonObject
+            ?.get("browseEndpoint")?.jsonObject
+            ?.get("browseId")?.jsonPrimitive?.contentOrNull
+            ?: return null
+        val title = item["title"]?.let(::extractColumnText).orEmpty().ifBlank { return null }
+        val subRuns = item["subtitle"]?.let(::extractColumnRuns).orEmpty()
+        val year = subRuns.firstOrNull { it.length == 4 && it.all(Char::isDigit) }
+            ?: subRuns.lastOrNull { it != " • " }.orEmpty()
+        val thumb = upgradeThumbResolution(extractBestThumbnail(item["thumbnailRenderer"]))
+        return AlbumSummary(
+            browseId = bid,
+            title = title,
+            year = year,
+            thumbnailUrl = thumb,
+            isSingle = isSingle,
+        )
+    }
+
+    private fun parseRelatedArtistTwoRow(item: JsonObject): RelatedArtist? {
+        val bid = item["navigationEndpoint"]?.jsonObject
+            ?.get("browseEndpoint")?.jsonObject
+            ?.get("browseId")?.jsonPrimitive?.contentOrNull
+            ?: return null
+        val name = item["title"]?.let(::extractColumnText).orEmpty().ifBlank { return null }
+        val subs = item["subtitle"]?.let(::extractColumnText).orEmpty()
+        val thumb = upgradeThumbResolution(extractBestThumbnail(item["thumbnailRenderer"]))
+        return RelatedArtist(
+            browseId = bid,
+            name = name,
+            subscribers = subs,
+            thumbnailUrl = thumb,
+        )
+    }
+
+    private fun findFirstBrowseIdWithPrefix(el: JsonElement, prefix: String): String? = when (el) {
+        is JsonObject -> {
+            val bid = el["browseId"]?.jsonPrimitive?.contentOrNull
+            if (bid != null && bid.startsWith(prefix)) bid
+            else el.values.firstNotNullOfOrNull { findFirstBrowseIdWithPrefix(it, prefix) }
+        }
+        is JsonArray -> el.firstNotNullOfOrNull { findFirstBrowseIdWithPrefix(it, prefix) }
+        else -> null
+    }
+
+    private fun findFirstObjectByKey(el: JsonElement, targetKey: String): JsonObject? = when (el) {
+        is JsonObject -> {
+            el[targetKey]?.jsonObject ?: el.values.firstNotNullOfOrNull { findFirstObjectByKey(it, targetKey) }
+        }
+        is JsonArray -> el.firstNotNullOfOrNull { findFirstObjectByKey(it, targetKey) }
+        else -> null
+    }
+
+    private fun findAllObjectsByKey(el: JsonElement, targetKey: String): List<JsonObject> {
+        val out = mutableListOf<JsonObject>()
+        fun walk(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    node[targetKey]?.jsonObject?.let(out::add)
+                    node.values.forEach(::walk)
+                }
+                is JsonArray -> node.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(el)
+        return out
+    }
+
+    private fun upgradeBannerResolution(url: String): String {
+        if (url.isBlank()) return ""
+        return url.replace(Regex("=w\\d+-h\\d+"), "=w1080-h600")
+            .replace(Regex("=s\\d+"), "=s1080")
     }
 
     suspend fun fetchRadioQueue(videoId: String, limit: Int = 20): List<Track> = withContext(Dispatchers.IO) {

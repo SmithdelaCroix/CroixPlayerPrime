@@ -24,6 +24,8 @@ import com.croix.player.prime.data.UserPlaylistEntity
 import com.croix.prime.design.CroixDesignRepository
 import com.croix.prime.design.CroixDesignState
 import com.croix.prime.design.PrimePresets
+import com.croix.prime.engine.AlbumDetail
+import com.croix.prime.engine.AlbumSummary
 import com.croix.prime.engine.ArtistProfile
 import com.croix.prime.engine.HomeSection
 import com.croix.prime.engine.InnerTubeClient
@@ -84,6 +86,12 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _artistLoading = MutableStateFlow(false)
     val artistLoading: StateFlow<Boolean> = _artistLoading.asStateFlow()
+
+    private val _albumDetail = MutableStateFlow<AlbumDetail?>(null)
+    val albumDetail: StateFlow<AlbumDetail?> = _albumDetail.asStateFlow()
+
+    private val _albumLoading = MutableStateFlow(false)
+    val albumLoading: StateFlow<Boolean> = _albumLoading.asStateFlow()
 
     val favorites: StateFlow<List<Track>> = dao.observeFavorites()
         .map { list -> list.map { it.toTrack() } }
@@ -258,11 +266,12 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         playerController.playTrack(track, queue)
     }
 
-    fun openArtist(artistName: String) {
+    fun openArtist(artistName: String, browseId: String? = null) {
         viewModelScope.launch {
+            _albumDetail.value = null
             _artistLoading.value = true
-            _artistProfile.value = ArtistProfile(name = artistName, avatarUrl = "", topTracks = emptyList())
-            _artistProfile.value = innerTube.fetchArtistProfile(artistName)
+            _artistProfile.value = ArtistProfile(browseId = browseId.orEmpty(), name = artistName)
+            _artistProfile.value = innerTube.fetchArtistProfile(artistName, browseId)
             _artistLoading.value = false
         }
     }
@@ -270,6 +279,26 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     fun closeArtist() {
         _artistProfile.value = null
         _artistLoading.value = false
+    }
+
+    fun openAlbum(summary: AlbumSummary) {
+        viewModelScope.launch {
+            _albumLoading.value = true
+            _albumDetail.value = AlbumDetail(
+                browseId = summary.browseId,
+                title = summary.title,
+                artist = _artistProfile.value?.name.orEmpty(),
+                year = summary.year,
+                thumbnailUrl = summary.thumbnailUrl,
+            )
+            _albumDetail.value = innerTube.fetchAlbumDetail(summary)
+            _albumLoading.value = false
+        }
+    }
+
+    fun closeAlbum() {
+        _albumDetail.value = null
+        _albumLoading.value = false
     }
 
     fun onSearchQueryChange(q: String) {

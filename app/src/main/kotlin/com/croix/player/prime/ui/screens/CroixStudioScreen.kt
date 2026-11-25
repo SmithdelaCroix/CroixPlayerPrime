@@ -213,7 +213,7 @@ fun SettingsAndStudioOverlay(
                             ) {
                                 Icon(Icons.Rounded.Info, null, tint = palette.textSecondary)
                                 Column {
-                                    Text("Croix Player Prime v2.2.0", color = Color.White, fontWeight = FontWeight.Bold)
+                                    Text("Croix Player Prime v2.3.0", color = Color.White, fontWeight = FontWeight.Bold)
                                     Text("120fps Glass Engine • arm64-v8a • GPL-3.0", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
                                 }
                             }

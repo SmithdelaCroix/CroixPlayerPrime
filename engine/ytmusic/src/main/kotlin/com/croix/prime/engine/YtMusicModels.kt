@@ -23,11 +23,43 @@ data class HomeSection(
 )
 
 @Serializable
-data class ArtistProfile(
+data class AlbumSummary(
+    val browseId: String,
+    val title: String,
+    val year: String = "",
+    val thumbnailUrl: String = "",
+    val isSingle: Boolean = false,
+)
+
+@Serializable
+data class RelatedArtist(
+    val browseId: String,
     val name: String,
-    val avatarUrl: String,
-    val topTracks: List<Track>,
-    val relatedTracks: List<Track> = emptyList(),
+    val subscribers: String = "",
+    val thumbnailUrl: String = "",
+)
+
+@Serializable
+data class ArtistProfile(
+    val browseId: String = "",
+    val name: String,
+    val bannerUrl: String = "",
+    val monthlyListeners: String = "",
+    val description: String = "",
+    val topTracks: List<Track> = emptyList(),
+    val albums: List<AlbumSummary> = emptyList(),
+    val singles: List<AlbumSummary> = emptyList(),
+    val relatedArtists: List<RelatedArtist> = emptyList(),
+)
+
+@Serializable
+data class AlbumDetail(
+    val browseId: String,
+    val title: String,
+    val artist: String,
+    val year: String = "",
+    val thumbnailUrl: String = "",
+    val tracks: List<Track> = emptyList(),
 )
 
 @Serializable

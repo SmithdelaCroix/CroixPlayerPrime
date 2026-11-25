@@ -62,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.croix.player.prime.ui.CroixPrimeViewModel
+import com.croix.player.prime.ui.screens.AlbumDetailOverlay
 import com.croix.player.prime.ui.screens.ArtistProfileOverlay
 import com.croix.player.prime.ui.screens.FavoritesScreen
 import com.croix.player.prime.ui.screens.HomeScreen
@@ -116,6 +117,8 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val albumSecondary by vm.albumSecondary.collectAsState()
     val artistProfile by vm.artistProfile.collectAsState()
     val artistLoading by vm.artistLoading.collectAsState()
+    val albumDetail by vm.albumDetail.collectAsState()
+    val albumLoading by vm.albumLoading.collectAsState()
 
     var currentRoute by remember { mutableStateOf("home") }
     var playerExpanded by remember { mutableStateOf(false) }
@@ -208,16 +211,16 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                             onCreatePlaylist = vm::createPlaylist,
                             onDeletePlaylist = vm::deletePlaylist,
                             onOpenTrackMenu = { trackForMenu = it },
-                            onOpenArtist = vm::openArtist,
+                            onOpenArtist = { vm.openArtist(it) },
                             onOpenSettings = { settingsOpen = true },
                         )
                     }
                 }
             }
 
-            // Artist Profile Overlay
+            // Spotify-Style Translucent Artist Profile Overlay
             AnimatedVisibility(
-                visible = artistProfile != null && !playerExpanded && !settingsOpen,
+                visible = artistProfile != null && albumDetail == null && !playerExpanded && !settingsOpen,
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it / 4 }),
                 exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 4 }),
                 modifier = Modifier.zIndex(4f),
@@ -229,10 +232,33 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                         profile = prof,
                         isLoading = artistLoading,
                         favoriteIds = favoriteIds,
-                        downloadedIds = downloadedIds,
-                        downloadProgress = downloadProgress,
                         bottomPaddingDp = bottomClearance,
                         onClose = vm::closeArtist,
+                        onPlayTrack = vm::playTrack,
+                        onToggleFavorite = vm::toggleFavorite,
+                        onOpenTrackMenu = { trackForMenu = it },
+                        onOpenAlbum = vm::openAlbum,
+                        onOpenRelatedArtist = { rel -> vm.openArtist(rel.name, rel.browseId) },
+                    )
+                }
+            }
+
+            // Album / Single Detail Overlay
+            AnimatedVisibility(
+                visible = albumDetail != null && !playerExpanded && !settingsOpen,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 4 }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 4 }),
+                modifier = Modifier.zIndex(5f),
+            ) {
+                val alb = albumDetail
+                if (alb != null) {
+                    BackHandler { vm.closeAlbum() }
+                    AlbumDetailOverlay(
+                        album = alb,
+                        isLoading = albumLoading,
+                        favoriteIds = favoriteIds,
+                        bottomPaddingDp = bottomClearance,
+                        onClose = vm::closeAlbum,
                         onPlayTrack = vm::playTrack,
                         onToggleFavorite = vm::toggleFavorite,
                         onOpenTrackMenu = { trackForMenu = it },
@@ -267,6 +293,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                         currentRoute = currentRoute,
                         hazeState = contentHazeState,
                         onSelect = {
+                            vm.closeAlbum()
                             vm.closeArtist()
                             currentRoute = it
                         },

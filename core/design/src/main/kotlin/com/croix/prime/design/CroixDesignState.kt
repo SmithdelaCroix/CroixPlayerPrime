@@ -24,7 +24,7 @@ enum class PrimeColorMode(val label: String) {
     ALBUM_MORPH("Album Morph"),
     DYNAMIC_SYSTEM("Material You"),
     AMOLED_BLACK("AMOLED Black"),
-    CUSTOM_COLOR("Custom Color"),
+    CUSTOM_GRADIENT("Custom Gradient"),
 }
 
 @Serializable
@@ -41,6 +41,14 @@ enum class PrimeProgressStyle(val label: String) {
     CAPSULE("Capsule"),
     THIN_LINE("Thin Line"),
     SQUIGGLY("Squiggly"),
+}
+
+@Serializable
+enum class PrimeVisualizerStyle(val label: String) {
+    OFF("Off"),
+    SPECTRUM_BARS("Spectrum Bars"),
+    PULSE_WAVE("Pulse Wave"),
+    ORBIT_RINGS("Orbit Rings"),
 }
 
 @Serializable
@@ -74,22 +82,32 @@ data class CroixDesignState(
     val borderGlowAlpha: Float = 0.24f,
     val borderWidthDp: Float = 1.0f,
     val cornerRadiusDp: Float = 22f,
-    val ambientGlowStrength: Float = 0.42f,
-    // Color Engine
+    val ambientGlowStrength: Float = 0.48f,
+    val backdropMotionEnabled: Boolean = true,
+    val backdropMotionSpeed: Float = 1.0f,
+    // Free Gradient & Color Engine
     val colorMode: PrimeColorMode = PrimeColorMode.VIOLET_GLASS,
     val customAccentArgb: Long = 0xFFA238FF,
     val secondaryAccentArgb: Long = 0xFFFF2E93,
+    val primaryHue: Float = 272f,
+    val secondaryHue: Float = 330f,
     // Home Screen customization
     val showCroixFlowHero: Boolean = true,
     val showMoodChips: Boolean = true,
-    val showRecentSection: Boolean = true,
+    val showQuickResumeGrid: Boolean = true,
     val cardDensity: PrimeCardDensity = PrimeCardDensity.EDITORIAL,
-    // Now Playing Screen
+    // Now Playing & Visualizer
     val playerStyle: PrimePlayerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
     val progressStyle: PrimeProgressStyle = PrimeProgressStyle.WAVEFORM,
+    val visualizerStyle: PrimeVisualizerStyle = PrimeVisualizerStyle.SPECTRUM_BARS,
     val artworkCornerDp: Float = 24f,
     val vinylSpinEnabled: Boolean = false,
-    val playerControlDockOpacity: Float = 0.20f,
+    val playerControlDockOpacity: Float = 0.22f,
+    // Gestures & Hardware
+    val swipeArtworkToSkip: Boolean = true,
+    val doubleTapSeekSeconds: Int = 10,
+    val shakeToSkipEnabled: Boolean = false,
+    val shakeSensitivity: Float = 0.55f,
     // Navigation & Mini-Player
     val navBarStyle: PrimeNavBarStyle = PrimeNavBarStyle.FLOATING_GLASS_PILL,
     val showNavLabels: Boolean = true,
@@ -99,7 +117,7 @@ data class CroixDesignState(
     val lyricsFontSizeSp: Float = 24f,
     val lyricsAlign: PrimeLyricsAlign = PrimeLyricsAlign.START,
     val lyricsBackdropBlurDp: Float = 26f,
-    // SponsorBlock integrated settings
+    // SponsorBlock
     val sponsorBlockEnabled: Boolean = true,
     val skipMusicOfftopic: Boolean = true,
     val skipSponsors: Boolean = true,
@@ -112,15 +130,20 @@ data class CroixDesignState(
         borderWidthDp = borderWidthDp.coerceIn(0.5f, 2.5f),
         cornerRadiusDp = cornerRadiusDp.coerceIn(8f, 32f),
         ambientGlowStrength = ambientGlowStrength.coerceIn(0f, 0.9f),
+        backdropMotionSpeed = backdropMotionSpeed.coerceIn(0.2f, 2.5f),
+        primaryHue = primaryHue.coerceIn(0f, 360f),
+        secondaryHue = secondaryHue.coerceIn(0f, 360f),
         artworkCornerDp = artworkCornerDp.coerceIn(0f, 36f),
         playerControlDockOpacity = playerControlDockOpacity.coerceIn(0.05f, 0.80f),
+        doubleTapSeekSeconds = doubleTapSeekSeconds.coerceIn(5, 30),
+        shakeSensitivity = shakeSensitivity.coerceIn(0.1f, 1.0f),
         miniPlayerHeightDp = miniPlayerHeightDp.coerceIn(56f, 84f),
         lyricsFontSizeSp = lyricsFontSizeSp.coerceIn(16f, 36f),
         lyricsBackdropBlurDp = lyricsBackdropBlurDp.coerceIn(0f, 34f),
     )
 
-    val customAccentColor: Color get() = Color(customAccentArgb)
-    val secondaryAccentColor: Color get() = Color(secondaryAccentArgb)
+    val customPrimaryFromHue: Color get() = Color.hsv(primaryHue.coerceIn(0f, 360f), 0.78f, 1.0f)
+    val customSecondaryFromHue: Color get() = Color.hsv(secondaryHue.coerceIn(0f, 360f), 0.82f, 1.0f)
 
     fun enabledSponsorCategories(): Set<String> = buildSet {
         if (!sponsorBlockEnabled) return@buildSet
@@ -145,10 +168,11 @@ object PrimePresets {
         borderGlowAlpha = 0.26f,
         cornerRadiusDp = 22f,
         colorMode = PrimeColorMode.VIOLET_GLASS,
-        customAccentArgb = 0xFFA238FF,
-        secondaryAccentArgb = 0xFFFF2E93,
+        primaryHue = 272f,
+        secondaryHue = 330f,
         playerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
         progressStyle = PrimeProgressStyle.WAVEFORM,
+        visualizerStyle = PrimeVisualizerStyle.SPECTRUM_BARS,
     )
 
     val FrostedNeonCyan = CroixDesignState(
@@ -159,10 +183,11 @@ object PrimePresets {
         borderWidthDp = 1.2f,
         cornerRadiusDp = 26f,
         colorMode = PrimeColorMode.NEON_CYAN,
-        customAccentArgb = 0xFF00E5FF,
-        secondaryAccentArgb = 0xFF7C4DFF,
+        primaryHue = 186f,
+        secondaryHue = 262f,
         playerStyle = PrimePlayerStyle.FROSTED_GLASS,
         progressStyle = PrimeProgressStyle.SQUIGGLY,
+        visualizerStyle = PrimeVisualizerStyle.PULSE_WAVE,
     )
 
     val AlbumMorphLive = CroixDesignState(
@@ -174,6 +199,7 @@ object PrimePresets {
         colorMode = PrimeColorMode.ALBUM_MORPH,
         playerStyle = PrimePlayerStyle.FULLSCREEN_COVER,
         progressStyle = PrimeProgressStyle.CAPSULE,
+        visualizerStyle = PrimeVisualizerStyle.ORBIT_RINGS,
         lyricsAlign = PrimeLyricsAlign.CENTER,
     )
 
@@ -183,10 +209,12 @@ object PrimePresets {
         glassBlurDp = 10f,
         borderGlowAlpha = 0.14f,
         ambientGlowStrength = 0.12f,
+        backdropMotionEnabled = false,
         cornerRadiusDp = 16f,
         colorMode = PrimeColorMode.AMOLED_BLACK,
         playerStyle = PrimePlayerStyle.MINIMAL_CLEAN,
         progressStyle = PrimeProgressStyle.THIN_LINE,
+        visualizerStyle = PrimeVisualizerStyle.OFF,
         miniPlayerFloating = false,
     )
 

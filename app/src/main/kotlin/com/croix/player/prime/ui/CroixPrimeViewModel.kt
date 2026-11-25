@@ -15,8 +15,12 @@ import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.croix.player.prime.data.CroixDatabase
+import com.croix.player.prime.data.DownloadedTrackEntity
 import com.croix.player.prime.data.FavoriteTrackEntity
 import com.croix.player.prime.data.HistoryTrackEntity
+import com.croix.player.prime.data.ListeningStatsSummary
+import com.croix.player.prime.data.PlaylistTrackEntity
+import com.croix.player.prime.data.UserPlaylistEntity
 import com.croix.prime.design.CroixDesignRepository
 import com.croix.prime.design.CroixDesignState
 import com.croix.prime.design.PrimePresets
@@ -27,7 +31,9 @@ import com.croix.prime.engine.LyricsResult
 import com.croix.prime.engine.MoodChip
 import com.croix.prime.engine.SponsorBlockClient
 import com.croix.prime.engine.Track
+import com.croix.prime.playback.CroixDownloadManager
 import com.croix.prime.playback.CroixPlayerController
+import com.croix.prime.playback.CroixShakeDetector
 import com.croix.prime.playback.PlaybackUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,6 +54,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     private val dao = CroixDatabase.get(appContext).dao()
     private val designRepo = CroixDesignRepository(appContext)
     private val imageLoader = ImageLoader(appContext)
+    val downloadManager = CroixDownloadManager(appContext, innerTube)
 
     val designState: StateFlow<CroixDesignState> = designRepo.designFlow.stateIn(
         viewModelScope,
@@ -59,18 +66,54 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         context = appContext,
         innerTube = innerTube,
         sponsorBlock = sponsorBlock,
+        localFileProvider = { id -> downloadManager.getDownloadedFile(id) },
         enabledCategoriesProvider = { designState.value.enabledSponsorCategories() },
     )
 
+    private val shakeDetector = CroixShakeDetector(appContext) {
+        playerController.skipNext()
+    }
+
     val playbackState: StateFlow<PlaybackUiState> = playerController.state
+    val downloadProgress: StateFlow<Map<String, Float>> = downloadManager.activeProgress
 
     val favorites: StateFlow<List<Track>> = dao.observeFavorites()
         .map { list -> list.map { it.toTrack() } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val history: StateFlow<List<Track>> = dao.observeHistory()
+    val historyEntities: StateFlow<List<HistoryTrackEntity>> = dao.observeHistory()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val history: StateFlow<List<Track>> = historyEntities
         .map { list -> list.map { it.toTrack() } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val downloads: StateFlow<List<DownloadedTrackEntity>> = dao.observeDownloads()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val playlists: StateFlow<List<UserPlaylistEntity>> = dao.observePlaylists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val playlistTracks: StateFlow<Map<Long, List<Track>>> = dao.observeAllPlaylistTracks()
+        .map { rows -> rows.groupBy({ it.playlistId }, { it.toTrack() }) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    val listeningStats: StateFlow<ListeningStatsSummary> = historyEntities
+        .map { rows ->
+            val totalPlays = rows.sumOf { it.playCount }
+            val estMin = rows.sumOf { (if (it.durationSeconds > 0) it.durationSeconds else 210) * it.playCount } / 60
+            val topArtists = rows.groupBy { it.artist }
+                .mapValues { (_, items) -> items.sumOf { it.playCount } }
+                .entries
+                .sortedByDescending { it.value }
+                .take(5)
+                .map { it.key to it.value }
+            val topTracks = rows.sortedByDescending { it.playCount }
+                .take(5)
+                .map { it.toTrack() to it.playCount }
+            ListeningStatsSummary(totalPlays, estMin, topArtists, topTracks)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ListeningStatsSummary())
 
     val moods: List<MoodChip> = innerTube.defaultMoods
 
@@ -106,6 +149,15 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     init {
         refreshHome()
         observeCurrentTrackSideEffects()
+        observeShakePreference()
+    }
+
+    private fun observeShakePreference() {
+        viewModelScope.launch {
+            designState.collect { cfg ->
+                shakeDetector.configure(cfg.shakeToSkipEnabled, cfg.shakeSensitivity)
+            }
+        }
     }
 
     private fun observeCurrentTrackSideEffects() {
@@ -115,9 +167,9 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                 .distinctUntilChangedBy { it?.id }
                 .collect { track ->
                     if (track == null) return@collect
-                    // Record play in Room history
                     launch(Dispatchers.IO) {
-                        dao.recordPlay(
+                        val existing = dao.getHistoryById(track.id)
+                        dao.upsertHistory(
                             HistoryTrackEntity(
                                 id = track.id,
                                 title = track.title,
@@ -125,16 +177,16 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                                 album = track.album,
                                 durationSeconds = track.durationSeconds,
                                 thumbnailUrl = track.thumbnailUrl,
+                                playCount = (existing?.playCount ?: 0) + 1,
+                                playedAtMs = System.currentTimeMillis(),
                             ),
                         )
                     }
-                    // Fetch synced lyrics from LRCLib
                     launch {
                         _lyricsLoading.value = true
                         _lyrics.value = lrclib.fetchLyrics(track)
                         _lyricsLoading.value = false
                     }
-                    // Extract dynamic album colors for ALBUM_ART_MORPH mode
                     launch(Dispatchers.IO) {
                         extractArtworkColors(track.thumbnailUrl)
                     }
@@ -234,6 +286,64 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun downloadTrack(track: Track) {
+        viewModelScope.launch {
+            val res = downloadManager.downloadTrack(track)
+            res.onSuccess { file ->
+                launch(Dispatchers.IO) {
+                    dao.upsertDownload(
+                        DownloadedTrackEntity(
+                            id = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            album = track.album,
+                            durationSeconds = track.durationSeconds,
+                            thumbnailUrl = track.thumbnailUrl,
+                            fileSizeBytes = file.length(),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun deleteDownload(trackId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            downloadManager.deleteDownload(trackId)
+            dao.deleteDownloadRecord(trackId)
+        }
+    }
+
+    fun createPlaylist(name: String) {
+        val clean = name.trim()
+        if (clean.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.insertPlaylist(UserPlaylistEntity(name = clean))
+        }
+    }
+
+    fun deletePlaylist(playlistId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.deletePlaylist(playlistId)
+        }
+    }
+
+    fun addTrackToPlaylist(playlistId: Long, track: Track) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.addTrackToPlaylist(
+                PlaylistTrackEntity(
+                    playlistId = playlistId,
+                    trackId = track.id,
+                    title = track.title,
+                    artist = track.artist,
+                    album = track.album,
+                    durationSeconds = track.durationSeconds,
+                    thumbnailUrl = track.thumbnailUrl,
+                ),
+            )
+        }
+    }
+
     fun updateDesign(transform: (CroixDesignState) -> CroixDesignState) {
         viewModelScope.launch { designRepo.update(transform) }
     }
@@ -244,6 +354,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     override fun onCleared() {
         super.onCleared()
+        shakeDetector.release()
         playerController.release()
     }
 }

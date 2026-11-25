@@ -12,6 +12,9 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -31,36 +35,46 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,13 +84,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.croix.prime.design.CroixAudioVisualizer
 import com.croix.prime.design.CroixGlassCard
 import com.croix.prime.design.CroixSeekBar
 import com.croix.prime.design.LocalCroixDesign
@@ -86,6 +103,7 @@ import com.croix.prime.design.PrimePlayerStyle
 import com.croix.prime.engine.LrcParser
 import com.croix.prime.engine.LyricsResult
 import com.croix.prime.engine.Track
+import com.croix.prime.playback.EqPreset
 import com.croix.prime.playback.PlaybackUiState
 import dev.chrisbanes.haze.HazeState
 import kotlin.math.roundToInt
@@ -191,25 +209,35 @@ fun NowPlayingOverlay(
     lyrics: LyricsResult?,
     lyricsLoading: Boolean,
     isFavorite: Boolean,
+    isDownloaded: Boolean,
+    downloadProgress: Float?,
     onCollapse: () -> Unit,
     onTogglePlay: () -> Unit,
     onSeekFraction: (Float) -> Unit,
     onSeekMs: (Long) -> Unit,
+    onSeekRelative: (Long) -> Unit,
     onNext: () -> Unit,
     onPrev: () -> Unit,
     onToggleShuffle: () -> Unit,
     onToggleRepeat: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
+    onDownloadTrack: (Track) -> Unit,
+    onRequestAddToPlaylist: (Track) -> Unit,
     onSelectQueueIndex: (Int) -> Unit,
     onSetSleepTimer: (Int) -> Unit,
+    onSetEqEnabled: (Boolean) -> Unit,
+    onApplyEqPreset: (EqPreset) -> Unit,
+    onSetEqBand: (Int, Float) -> Unit,
     onSetBassBoost: (Float) -> Unit,
     onSetLoudness: (Int) -> Unit,
-    onOpenStudio: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val track = playback.currentTrack ?: return
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
-    var activePanel by remember { mutableIntStateOf(0) } // 0 = Player, 1 = Lyrics, 2 = Queue, 3 = Audio & Timer
+    var activePanel by remember { mutableIntStateOf(0) } // 0=Player, 1=Lyrics, 2=Queue, 3=EQ & Sleep
+    var carMode by remember { mutableStateOf(false) }
+    var dragOffsetX by remember { mutableFloatStateOf(0f) }
 
     val spin = rememberInfiniteTransition(label = "vinyl")
     val angle by spin.animateFloat(
@@ -225,13 +253,24 @@ fun NowPlayingOverlay(
 
     val touchBlocker = remember { MutableInteractionSource() }
 
+    if (carMode) {
+        CarAodModeOverlay(
+            track = track,
+            playback = playback,
+            onExit = { carMode = false },
+            onTogglePlay = onTogglePlay,
+            onNext = onNext,
+            onPrev = onPrev,
+        )
+        return
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.background)
             .clickable(interactionSource = touchBlocker, indication = null) {},
     ) {
-        // Real Android 12+ Blurred Artwork Backdrop
         AsyncImage(
             model = track.thumbnailUrl,
             contentDescription = null,
@@ -246,7 +285,7 @@ fun NowPlayingOverlay(
                 .background(
                     Brush.verticalGradient(
                         listOf(
-                            Color.Black.copy(alpha = 0.45f),
+                            Color.Black.copy(alpha = 0.42f),
                             palette.background.copy(alpha = 0.78f),
                             palette.background.copy(alpha = 0.94f),
                         ),
@@ -275,32 +314,39 @@ fun NowPlayingOverlay(
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("PLAYING NOW", style = MaterialTheme.typography.labelMedium, color = palette.textSecondary)
-                    if (playback.sponsorSegments.isNotEmpty() && design.sponsorBlockEnabled) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Shield, null, tint = palette.primary, modifier = Modifier.size(13.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "SponsorBlock (${playback.sponsorSegments.size})",
-                                fontSize = 11.sp,
-                                color = palette.primary,
-                            )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (playback.isPlayingOfflineFile) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.OfflinePin, null, tint = palette.secondary, modifier = Modifier.size(13.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Offline", fontSize = 11.sp, color = palette.secondary)
+                            }
+                        }
+                        if (playback.sponsorSegments.isNotEmpty() && design.sponsorBlockEnabled) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Shield, null, tint = palette.primary, modifier = Modifier.size(13.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("SponsorBlock (${playback.sponsorSegments.size})", fontSize = 11.sp, color = palette.primary)
+                            }
                         }
                     }
                 }
-                CroixGlassCard(cornerRadius = 50.dp, onClick = onOpenStudio) {
-                    IconButton(onClick = onOpenStudio, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Rounded.Tune, contentDescription = "Customize", tint = Color.White)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CroixGlassCard(cornerRadius = 50.dp, onClick = { carMode = true }) {
+                        IconButton(onClick = { carMode = true }, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Rounded.DirectionsCar, contentDescription = "Car / AOD Mode", tint = Color.White)
+                        }
+                    }
+                    CroixGlassCard(cornerRadius = 50.dp, onClick = onOpenSettings) {
+                        IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = Color.White)
+                        }
                     }
                 }
             }
 
-            // Live SponsorBlock Skip Banner
             if (playback.lastSkippedNotice != null) {
-                CroixGlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    accentTint = palette.primary,
-                    cornerRadius = 14.dp,
-                ) {
+                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary, cornerRadius = 14.dp) {
                     Text(
                         text = playback.lastSkippedNotice!!,
                         style = MaterialTheme.typography.labelMedium,
@@ -310,33 +356,57 @@ fun NowPlayingOverlay(
                 }
             }
 
-            // Center Dynamic Panel (Player / Lyrics / Queue / Audio FX)
+            // Center Dynamic Panel
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
+                    .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 when (activePanel) {
                     0 -> {
                         val artShape = if (design.vinylSpinEnabled) CircleShape else RoundedCornerShape(design.artworkCornerDp.dp)
                         val artFill = when (design.playerStyle) {
-                            PrimePlayerStyle.FULLSCREEN_COVER -> 0.96f
-                            PrimePlayerStyle.MINIMAL_CLEAN -> 0.72f
-                            else -> 0.86f
+                            PrimePlayerStyle.FULLSCREEN_COVER -> 0.94f
+                            PrimePlayerStyle.MINIMAL_CLEAN -> 0.70f
+                            else -> 0.84f
                         }
                         val rotation = if (design.vinylSpinEnabled && playback.isPlaying) angle else 0f
 
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             CroixGlassCard(
                                 modifier = Modifier
                                     .fillMaxWidth(artFill)
-                                    .aspectRatio(1f),
+                                    .aspectRatio(1f)
+                                    .offset { IntOffset(dragOffsetX.roundToInt(), 0) }
+                                    .pointerInput(design.swipeArtworkToSkip) {
+                                        if (!design.swipeArtworkToSkip) return@pointerInput
+                                        detectHorizontalDragGestures(
+                                            onDragEnd = {
+                                                if (dragOffsetX < -130f) onNext()
+                                                else if (dragOffsetX > 130f) onPrev()
+                                                dragOffsetX = 0f
+                                            },
+                                            onDragCancel = { dragOffsetX = 0f },
+                                            onHorizontalDrag = { _, dragAmount ->
+                                                dragOffsetX = (dragOffsetX + dragAmount).coerceIn(-240f, 240f)
+                                            },
+                                        )
+                                    }
+                                    .pointerInput(design.doubleTapSeekSeconds) {
+                                        detectTapGestures(
+                                            onDoubleTap = { offset ->
+                                                val delta = design.doubleTapSeekSeconds * 1_000L
+                                                if (offset.x < size.width / 2f) onSeekRelative(-delta)
+                                                else onSeekRelative(delta)
+                                            },
+                                        )
+                                    },
                                 cornerRadius = if (design.vinylSpinEnabled) 200.dp else design.artworkCornerDp.dp,
                             ) {
                                 AsyncImage(
@@ -349,6 +419,10 @@ fun NowPlayingOverlay(
                                         .rotate(rotation),
                                 )
                             }
+                            CroixAudioVisualizer(
+                                isPlaying = playback.isPlaying,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
                         }
                     }
                     1 -> SyncedLyricsPanel(
@@ -362,16 +436,19 @@ fun NowPlayingOverlay(
                         currentIndex = playback.currentIndex,
                         onSelect = onSelectQueueIndex,
                     )
-                    3 -> AudioAndSleepPanel(
+                    3 -> EqualizerAndSleepPanel(
                         playback = playback,
                         onSetSleepTimer = onSetSleepTimer,
+                        onSetEqEnabled = onSetEqEnabled,
+                        onApplyEqPreset = onApplyEqPreset,
+                        onSetEqBand = onSetEqBand,
                         onSetBassBoost = onSetBassBoost,
                         onSetLoudness = onSetLoudness,
                     )
                 }
             }
 
-            // Deezer × Yuma Translucent Control Dock
+            // Translucent Control Dock
             CroixGlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 opacityOverride = design.playerControlDockOpacity,
@@ -380,8 +457,8 @@ fun NowPlayingOverlay(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -403,7 +480,26 @@ fun NowPlayingOverlay(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        IconButton(onClick = { onToggleFavorite(track) }) {
+                        if (downloadProgress != null) {
+                            CircularProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.dp,
+                                color = palette.primary,
+                            )
+                        } else {
+                            IconButton(onClick = { onDownloadTrack(track) }, modifier = Modifier.size(36.dp)) {
+                                Icon(
+                                    if (isDownloaded) Icons.Rounded.CheckCircle else Icons.Rounded.Download,
+                                    contentDescription = "Download",
+                                    tint = if (isDownloaded) palette.primary else Color.White,
+                                )
+                            }
+                        }
+                        IconButton(onClick = { onRequestAddToPlaylist(track) }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Rounded.PlaylistAdd, contentDescription = "Add to playlist", tint = Color.White)
+                        }
+                        IconButton(onClick = { onToggleFavorite(track) }, modifier = Modifier.size(36.dp)) {
                             Icon(
                                 if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                                 contentDescription = "Favorite",
@@ -439,11 +535,9 @@ fun NowPlayingOverlay(
                         }
                         Box(
                             modifier = Modifier
-                                .size(64.dp)
+                                .size(62.dp)
                                 .clip(CircleShape)
-                                .background(
-                                    Brush.linearGradient(listOf(palette.primary, palette.secondary)),
-                                )
+                                .background(Brush.linearGradient(listOf(palette.primary, palette.secondary)))
                                 .clickable(onClick = onTogglePlay),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -466,7 +560,6 @@ fun NowPlayingOverlay(
                         }
                     }
 
-                    // Bottom Action Pills: Lyrics / Queue / Audio & Timer
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -477,11 +570,73 @@ fun NowPlayingOverlay(
                         PanelToggleIcon(Icons.Rounded.QueueMusic, "Queue", activePanel == 2) {
                             activePanel = if (activePanel == 2) 0 else 2
                         }
-                        PanelToggleIcon(Icons.Rounded.Equalizer, "Audio", activePanel == 3) {
+                        PanelToggleIcon(Icons.Rounded.Equalizer, "EQ & Sleep", activePanel == 3) {
                             activePanel = if (activePanel == 3) 0 else 3
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CarAodModeOverlay(
+    track: Track,
+    playback: PlaybackUiState,
+    onExit: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit,
+) {
+    val palette = LocalCroixPalette.current
+    val blocker = remember { MutableInteractionSource() }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable(interactionSource = blocker, indication = null) {}
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("CAR / AOD MODE", color = palette.primary, fontWeight = FontWeight.Black)
+            CroixGlassCard(cornerRadius = 50.dp, onClick = onExit) {
+                Text("Exit", color = Color.White, modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(track.title, style = MaterialTheme.typography.headlineLarge, color = Color.White, textAlign = TextAlign.Center, maxLines = 2)
+            Text(track.artist, style = MaterialTheme.typography.titleLarge, color = palette.textSecondary, textAlign = TextAlign.Center, maxLines = 1)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onPrev, modifier = Modifier.size(76.dp)) {
+                Icon(Icons.Rounded.SkipPrevious, contentDescription = "Prev", tint = Color.White, modifier = Modifier.size(56.dp))
+            }
+            Box(
+                modifier = Modifier
+                    .size(96.dp)
+                    .clip(CircleShape)
+                    .background(palette.primary)
+                    .clickable(onClick = onTogglePlay),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = "Play/Pause",
+                    tint = Color.White,
+                    modifier = Modifier.size(58.dp),
+                )
+            }
+            IconButton(onClick = onNext, modifier = Modifier.size(76.dp)) {
+                Icon(Icons.Rounded.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(56.dp))
             }
         }
     }
@@ -616,44 +771,81 @@ private fun QueuePanel(
 }
 
 @Composable
-private fun AudioAndSleepPanel(
+private fun EqualizerAndSleepPanel(
     playback: PlaybackUiState,
     onSetSleepTimer: (Int) -> Unit,
+    onSetEqEnabled: (Boolean) -> Unit,
+    onApplyEqPreset: (EqPreset) -> Unit,
+    onSetEqBand: (Int, Float) -> Unit,
     onSetBassBoost: (Float) -> Unit,
     onSetLoudness: (Int) -> Unit,
 ) {
     val palette = LocalCroixPalette.current
-    CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val bandLabels = listOf("60Hz", "230Hz", "910Hz", "3.6kHz", "14kHz")
+
+    CroixGlassCard(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("5-Band Hardware Equalizer", color = Color.White, fontWeight = FontWeight.Bold)
+                Switch(checked = playback.eqEnabled, onCheckedChange = onSetEqEnabled)
+            }
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                EqPreset.entries.filter { it != EqPreset.CUSTOM }.forEach { preset ->
+                    CroixGlassCard(
+                        cornerRadius = 12.dp,
+                        accentTint = if (playback.eqPreset == preset && playback.eqEnabled) palette.primary else null,
+                        onClick = { onApplyEqPreset(preset) },
+                    ) {
+                        Text(preset.label, color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                    }
+                }
+            }
+            playback.eqBandsDb.forEachIndexed { idx, gain ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(bandLabels.getOrElse(idx) { "B${idx + 1}" }, color = palette.textSecondary, fontSize = 11.sp, modifier = Modifier.width(46.dp))
+                    Slider(
+                        value = gain,
+                        onValueChange = { onSetEqBand(idx, it) },
+                        valueRange = -12f..12f,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("${gain.roundToInt()}dB", color = palette.primary, fontSize = 11.sp, modifier = Modifier.width(38.dp))
+                }
+            }
+
+            Text("Bass Boost: ${(playback.bassBoostLevel * 100).roundToInt()}%", color = Color.White, fontSize = 13.sp)
+            Slider(value = playback.bassBoostLevel, onValueChange = onSetBassBoost, valueRange = 0f..1f)
+
+            Text("Loudness Boost: +${playback.loudnessGainMb / 100} dB", color = Color.White, fontSize = 13.sp)
+            Slider(value = playback.loudnessGainMb.toFloat(), onValueChange = { onSetLoudness(it.roundToInt()) }, valueRange = 0f..1200f)
+
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Bedtime, null, tint = palette.primary)
-                Spacer(Modifier.width(8.dp))
+                Icon(Icons.Rounded.Bedtime, null, tint = palette.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
                 Text(
                     text = if (playback.sleepTimerRemainingSec > 0) {
                         "Sleep Timer (${playback.sleepTimerRemainingSec / 60}m ${playback.sleepTimerRemainingSec % 60}s)"
-                    } else "Sleep Timer Pro (Fade-out)",
+                    } else "Sleep Timer (Fade-out)",
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(0 to "Off", 15 to "15m", 30 to "30m", 60 to "60m").forEach { (mins, lbl) ->
-                    CroixGlassCard(
-                        cornerRadius = 12.dp,
-                        onClick = { onSetSleepTimer(mins) },
-                    ) {
-                        Text(lbl, color = Color.White, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                    CroixGlassCard(cornerRadius = 12.dp, onClick = { onSetSleepTimer(mins) }) {
+                        Text(lbl, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                     }
                 }
             }
-            Text("Bass Boost: ${(playback.bassBoostLevel * 100).roundToInt()}%", color = Color.White)
-            Slider(value = playback.bassBoostLevel, onValueChange = onSetBassBoost, valueRange = 0f..1f)
-            Text("Loudness Boost: +${playback.loudnessGainMb / 100} dB", color = Color.White)
-            Slider(
-                value = playback.loudnessGainMb.toFloat(),
-                onValueChange = { onSetLoudness(it.roundToInt()) },
-                valueRange = 0f..1200f,
-            )
         }
     }
 }

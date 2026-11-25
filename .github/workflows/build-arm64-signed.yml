@@ -1,4 +1,4 @@
-name: Croix Player Prime (ARM64 Signed)
+name: Croix Player Prime (ARM64 Signed Direct APK)
 
 on:
   push:
@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-prime-arm64:
@@ -58,7 +61,7 @@ jobs:
       - name: Build Signed ARM64 Release APK
         run: ./gradlew --console=plain --no-daemon :app:assembleRelease
 
-      - name: Verify APK Digital Signature
+      - name: Verify APK Digital Signature & Stage Direct APK
         run: |
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "Verifying signature for $APK_PATH"
@@ -66,9 +69,19 @@ jobs:
           if [ -n "$APKSIGNER" ]; then
             "$APKSIGNER" verify --verbose "$APK_PATH"
           fi
+          cp "$APK_PATH" CroixPlayerPrime-arm64-v8a-signed.apk
 
-      - name: Upload Signed ARM64 APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: croix-player-prime-arm64-signed-apk
-          path: app/build/outputs/apk/release/*.apk
+      - name: Publish Direct Signed APK to GitHub Release (No ZIP)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="latest-prime"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" CroixPlayerPrime-arm64-v8a-signed.apk --clobber
+            gh release edit "$TAG" --title "Croix Player Prime (Latest ARM64 APK)" --notes "Direct signed ARM64 (ARMv8/ARMv9) Android 12+ APK built from commit ${GITHUB_SHA::7}."
+          else
+            gh release create "$TAG" CroixPlayerPrime-arm64-v8a-signed.apk \
+              --title "Croix Player Prime (Latest ARM64 APK)" \
+              --notes "Direct signed ARM64 (ARMv8/ARMv9) Android 12+ APK built from commit ${GITHUB_SHA::7}."
+          fi

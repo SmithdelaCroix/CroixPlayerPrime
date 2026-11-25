@@ -26,7 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,22 +64,22 @@ fun HomeScreen(
     onPlayMood: (MoodChip) -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
     onRefresh: () -> Unit,
-    onOpenStudio: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
     val cardSize = when (design.cardDensity) {
         PrimeCardDensity.COMPACT -> 124.dp
-        PrimeCardDensity.EDITORIAL -> 148.dp
-        PrimeCardDensity.SPACIOUS -> 168.dp
+        PrimeCardDensity.EDITORIAL -> 150.dp
+        PrimeCardDensity.SPACIOUS -> 170.dp
     }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 18.dp, bottom = bottomPaddingDp.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = bottomPaddingDp.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
-        // Deezer-style Bold Editorial Header + Quick Studio Button
+        // Bold Editorial Top Bar with Top-Right Settings Gear
         item {
             Row(
                 modifier = Modifier
@@ -88,22 +88,15 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column {
-                    Text(
-                        text = "Croix Prime",
-                        style = MaterialTheme.typography.headlineLarge,
-                        color = Color.White,
-                    )
-                    Text(
-                        text = "Music • Translucent & Yours",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = palette.textSecondary,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Home",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Color.White,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CroixGlassCard(
                         hazeState = hazeState,
-                        cornerRadius = 16.dp,
+                        cornerRadius = 50.dp,
                         onClick = onRefresh,
                     ) {
                         IconButton(onClick = onRefresh, modifier = Modifier.size(42.dp)) {
@@ -112,26 +105,26 @@ fun HomeScreen(
                     }
                     CroixGlassCard(
                         hazeState = hazeState,
-                        cornerRadius = 16.dp,
+                        cornerRadius = 50.dp,
                         accentTint = palette.primary,
-                        onClick = onOpenStudio,
+                        onClick = onOpenSettings,
                     ) {
-                        IconButton(onClick = onOpenStudio, modifier = Modifier.size(42.dp)) {
-                            Icon(Icons.Rounded.Tune, contentDescription = "Croix Studio", tint = Color.White)
+                        IconButton(onClick = onOpenSettings, modifier = Modifier.size(42.dp)) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = Color.White)
                         }
                     }
                 }
             }
         }
 
-        // Deezer Flow-Inspired Translucent Hero Card
+        // Translucent Flow Wheel Hero Card
         if (design.showCroixFlowHero) {
             item {
                 CroixGlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp)
-                        .height(152.dp),
+                        .height(168.dp),
                     hazeState = hazeState,
                     accentTint = palette.primary,
                     onClick = onPlayFlow,
@@ -142,8 +135,8 @@ fun HomeScreen(
                             .background(
                                 Brush.linearGradient(
                                     listOf(
-                                        palette.primary.copy(alpha = 0.42f),
-                                        palette.secondary.copy(alpha = 0.28f),
+                                        palette.primary.copy(alpha = 0.50f),
+                                        palette.secondary.copy(alpha = 0.34f),
                                         Color.Transparent,
                                     ),
                                 ),
@@ -164,40 +157,45 @@ fun HomeScreen(
                                         Icons.Rounded.AutoAwesome,
                                         contentDescription = null,
                                         tint = Color.White,
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier.size(16.dp),
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = "INFINITE MIX",
+                                        text = "FLOW",
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = Color.White.copy(alpha = 0.85f),
+                                        color = Color.White.copy(alpha = 0.90f),
                                     )
                                 }
                                 Text(
-                                    text = "Croix Flow",
+                                    text = "Your infinite mix",
                                     style = MaterialTheme.typography.headlineMedium,
                                     color = Color.White,
                                 )
                                 Text(
-                                    text = "Endless soundtrack blended for you, ad-free with SponsorBlock.",
+                                    text = "Tailored tracks blended non-stop with SponsorBlock.",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = 0.78f),
+                                    color = Color.White.copy(alpha = 0.80f),
                                     maxLines = 2,
                                 )
                             }
-                            Spacer(Modifier.width(12.dp))
+                            Spacer(Modifier.width(14.dp))
+                            // Iconic circular Play wheel
                             Box(
                                 modifier = Modifier
-                                    .size(58.dp)
+                                    .size(72.dp)
                                     .clip(CircleShape)
-                                    .background(Color.White),
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(Color.White, Color.White.copy(alpha = 0.88f)),
+                                        ),
+                                    ),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
                                     Icons.Rounded.PlayArrow,
-                                    contentDescription = "Play Croix Flow",
-                                    tint = Color(0xFF09080F),
-                                    modifier = Modifier.size(34.dp),
+                                    contentDescription = "Play Flow",
+                                    tint = Color(0xFF0A0910),
+                                    modifier = Modifier.size(40.dp),
                                 )
                             }
                         }
@@ -206,42 +204,105 @@ fun HomeScreen(
             }
         }
 
-        // Translucent Deezer Mood Chips
+        // Translucent Mood Wheels (Horizontal Circles / Pills)
         if (design.showMoodChips) {
             item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(moods) { mood ->
-                        CroixGlassCard(
-                            hazeState = hazeState,
-                            cornerRadius = 50.dp,
-                            accentTint = Color(mood.accentHex),
-                            onClick = { onPlayMood(mood) },
-                        ) {
-                            Text(
-                                text = mood.title,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                            )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Moods",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 18.dp),
+                    )
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 18.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(moods) { mood ->
+                            CroixGlassCard(
+                                hazeState = hazeState,
+                                cornerRadius = 50.dp,
+                                accentTint = Color(mood.accentHex),
+                                onClick = { onPlayMood(mood) },
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(mood.accentHex)),
+                                    )
+                                    Text(
+                                        text = mood.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color.White,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Recently Played Section
-        if (design.showRecentSection && recentTracks.isNotEmpty()) {
+        // Compact 2-Column Quick-Resume Grid (Recently Played)
+        if (design.showQuickResumeGrid && recentTracks.isNotEmpty()) {
             item {
-                EditorialTrackCarousel(
-                    title = "Jump Back In",
-                    tracks = recentTracks.take(12),
-                    cardSize = cardSize,
-                    hazeState = hazeState,
-                    onPlayTrack = { t -> onPlayTrack(t, recentTracks) },
-                )
+                val quickSix = recentTracks.take(6)
+                Column(
+                    modifier = Modifier.padding(horizontal = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = "Recently played",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                    )
+                    quickSix.chunked(2).forEach { pair ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            pair.forEach { track ->
+                                CroixGlassCard(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(60.dp),
+                                    hazeState = hazeState,
+                                    cornerRadius = 14.dp,
+                                    onClick = { onPlayTrack(track, recentTracks) },
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        AsyncImage(
+                                            model = track.thumbnailUrl,
+                                            contentDescription = track.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(60.dp)
+                                                .background(Color.White.copy(alpha = 0.08f)),
+                                        )
+                                        Text(
+                                            text = track.title,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color.White,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 10.dp),
+                                        )
+                                    }
+                                }
+                            }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
             }
         }
 
@@ -258,7 +319,7 @@ fun HomeScreen(
             }
         }
 
-        // YouTube Music Home Shelves
+        // Editorial Square Carousels
         items(sections) { section ->
             EditorialTrackCarousel(
                 title = section.title,

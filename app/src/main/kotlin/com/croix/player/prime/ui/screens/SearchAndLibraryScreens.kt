@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -71,7 +72,8 @@ fun SearchScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 18.dp, vertical = 18.dp),
+            .imePadding()
+            .padding(start = 18.dp, end = 18.dp, top = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text("Search", style = MaterialTheme.typography.headlineLarge, color = Color.White)
@@ -153,7 +155,8 @@ fun LibraryScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 18.dp, vertical = 18.dp),
+            .imePadding()
+            .padding(start = 18.dp, end = 18.dp, top = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text("Library", style = MaterialTheme.typography.headlineLarge, color = Color.White)

@@ -18,56 +18,56 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 @Serializable
-enum class PrimeColorMode {
-    DEEZER_VIOLET_GLASS,
-    YUMA_NEON_CYAN,
-    ALBUM_ART_MORPH,
-    MATERIAL_YOU,
-    AMOLED_GLASS,
-    CUSTOM_ACCENT,
+enum class PrimeColorMode(val label: String) {
+    VIOLET_GLASS("Violet Glass"),
+    NEON_CYAN("Neon Cyan"),
+    ALBUM_MORPH("Album Morph"),
+    DYNAMIC_SYSTEM("Material You"),
+    AMOLED_BLACK("AMOLED Black"),
+    CUSTOM_COLOR("Custom Color"),
 }
 
 @Serializable
-enum class PrimePlayerStyle {
-    DEEZER_TRANSLUCENT,
-    YUMA_GLASS_HYBRID,
-    FULLSCREEN_COVER,
-    MINIMAL_CLEAN,
+enum class PrimePlayerStyle(val label: String) {
+    TRANSLUCENT_CARD("Translucent Card"),
+    FROSTED_GLASS("Frosted Glass"),
+    FULLSCREEN_COVER("Fullscreen Cover"),
+    MINIMAL_CLEAN("Minimal Clean"),
 }
 
 @Serializable
-enum class PrimeProgressStyle {
-    WAVEFORM,
-    CAPSULE,
-    THIN_LINE,
-    SQUIGGLY,
+enum class PrimeProgressStyle(val label: String) {
+    WAVEFORM("Waveform"),
+    CAPSULE("Capsule"),
+    THIN_LINE("Thin Line"),
+    SQUIGGLY("Squiggly"),
 }
 
 @Serializable
-enum class PrimeNavBarStyle {
-    FLOATING_GLASS_PILL,
-    DOCKED_TRANSLUCENT,
-    COMPACT_ICONS,
+enum class PrimeNavBarStyle(val label: String) {
+    FLOATING_GLASS_PILL("Floating Pill"),
+    DOCKED_TRANSLUCENT("Docked Glass"),
+    COMPACT_ICONS("Compact Icons"),
 }
 
 @Serializable
-enum class PrimeCardDensity {
-    COMPACT,
-    DEEZER_EDITORIAL,
-    SPACIOUS,
+enum class PrimeCardDensity(val label: String) {
+    COMPACT("Compact"),
+    EDITORIAL("Editorial"),
+    SPACIOUS("Spacious"),
 }
 
 @Serializable
-enum class PrimeLyricsAlign {
-    START,
-    CENTER,
-    END,
+enum class PrimeLyricsAlign(val label: String) {
+    START("Left"),
+    CENTER("Center"),
+    END("Right"),
 }
 
 @Immutable
 @Serializable
 data class CroixDesignState(
-    val presetName: String = "Deezer Violet Glass",
+    val presetName: String = "Prime Violet Glass",
     // Glassmorphism translucency controls (applied across the ENTIRE app)
     val glassOpacity: Float = 0.16f,
     val glassBlurDp: Float = 22f,
@@ -76,16 +76,16 @@ data class CroixDesignState(
     val cornerRadiusDp: Float = 22f,
     val ambientGlowStrength: Float = 0.42f,
     // Color Engine
-    val colorMode: PrimeColorMode = PrimeColorMode.DEEZER_VIOLET_GLASS,
+    val colorMode: PrimeColorMode = PrimeColorMode.VIOLET_GLASS,
     val customAccentArgb: Long = 0xFFA238FF,
-    val secondaryAccentArgb: Long = 0xFF00E5FF,
-    // Home Screen (Deezer x Yuma customization)
+    val secondaryAccentArgb: Long = 0xFFFF2E93,
+    // Home Screen customization
     val showCroixFlowHero: Boolean = true,
     val showMoodChips: Boolean = true,
     val showRecentSection: Boolean = true,
-    val cardDensity: PrimeCardDensity = PrimeCardDensity.DEEZER_EDITORIAL,
+    val cardDensity: PrimeCardDensity = PrimeCardDensity.EDITORIAL,
     // Now Playing Screen
-    val playerStyle: PrimePlayerStyle = PrimePlayerStyle.DEEZER_TRANSLUCENT,
+    val playerStyle: PrimePlayerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
     val progressStyle: PrimeProgressStyle = PrimeProgressStyle.WAVEFORM,
     val artworkCornerDp: Float = 24f,
     val vinylSpinEnabled: Boolean = false,
@@ -138,30 +138,30 @@ data class CroixDesignState(
 }
 
 object PrimePresets {
-    val DeezerVioletGlass = CroixDesignState(
-        presetName = "Deezer Violet Glass",
+    val PrimeVioletGlass = CroixDesignState(
+        presetName = "Prime Violet Glass",
         glassOpacity = 0.16f,
         glassBlurDp = 22f,
         borderGlowAlpha = 0.26f,
         cornerRadiusDp = 22f,
-        colorMode = PrimeColorMode.DEEZER_VIOLET_GLASS,
+        colorMode = PrimeColorMode.VIOLET_GLASS,
         customAccentArgb = 0xFFA238FF,
         secondaryAccentArgb = 0xFFFF2E93,
-        playerStyle = PrimePlayerStyle.DEEZER_TRANSLUCENT,
+        playerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
         progressStyle = PrimeProgressStyle.WAVEFORM,
     )
 
-    val YumaFrostedNeon = CroixDesignState(
-        presetName = "Yuma Frosted Neon",
+    val FrostedNeonCyan = CroixDesignState(
+        presetName = "Frosted Neon Cyan",
         glassOpacity = 0.22f,
         glassBlurDp = 28f,
         borderGlowAlpha = 0.34f,
         borderWidthDp = 1.2f,
         cornerRadiusDp = 26f,
-        colorMode = PrimeColorMode.YUMA_NEON_CYAN,
+        colorMode = PrimeColorMode.NEON_CYAN,
         customAccentArgb = 0xFF00E5FF,
         secondaryAccentArgb = 0xFF7C4DFF,
-        playerStyle = PrimePlayerStyle.YUMA_GLASS_HYBRID,
+        playerStyle = PrimePlayerStyle.FROSTED_GLASS,
         progressStyle = PrimeProgressStyle.SQUIGGLY,
     )
 
@@ -171,7 +171,7 @@ object PrimePresets {
         glassBlurDp = 26f,
         borderGlowAlpha = 0.28f,
         ambientGlowStrength = 0.65f,
-        colorMode = PrimeColorMode.ALBUM_ART_MORPH,
+        colorMode = PrimeColorMode.ALBUM_MORPH,
         playerStyle = PrimePlayerStyle.FULLSCREEN_COVER,
         progressStyle = PrimeProgressStyle.CAPSULE,
         lyricsAlign = PrimeLyricsAlign.CENTER,
@@ -184,28 +184,28 @@ object PrimePresets {
         borderGlowAlpha = 0.14f,
         ambientGlowStrength = 0.12f,
         cornerRadiusDp = 16f,
-        colorMode = PrimeColorMode.AMOLED_GLASS,
+        colorMode = PrimeColorMode.AMOLED_BLACK,
         playerStyle = PrimePlayerStyle.MINIMAL_CLEAN,
         progressStyle = PrimeProgressStyle.THIN_LINE,
         miniPlayerFloating = false,
     )
 
-    val MaterialYouGlass = CroixDesignState(
-        presetName = "Material You Glass",
+    val DynamicGlass = CroixDesignState(
+        presetName = "Dynamic Glass",
         glassOpacity = 0.20f,
         glassBlurDp = 20f,
         borderGlowAlpha = 0.22f,
-        colorMode = PrimeColorMode.MATERIAL_YOU,
-        playerStyle = PrimePlayerStyle.DEEZER_TRANSLUCENT,
+        colorMode = PrimeColorMode.DYNAMIC_SYSTEM,
+        playerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
         progressStyle = PrimeProgressStyle.CAPSULE,
     )
 
     val All: List<CroixDesignState> = listOf(
-        DeezerVioletGlass,
-        YumaFrostedNeon,
+        PrimeVioletGlass,
+        FrostedNeonCyan,
         AlbumMorphLive,
         AmoledObsidian,
-        MaterialYouGlass,
+        DynamicGlass,
     )
 }
 
@@ -233,14 +233,14 @@ class CroixDesignRepository(private val context: Context) {
 
     val designFlow: Flow<CroixDesignState> = context.croixDesignStore.data.map { prefs ->
         val raw = prefs[key]
-        if (raw.isNullOrBlank()) PrimePresets.DeezerVioletGlass
-        else CroixThemeJson.import(raw).getOrDefault(PrimePresets.DeezerVioletGlass)
+        if (raw.isNullOrBlank()) PrimePresets.PrimeVioletGlass
+        else CroixThemeJson.import(raw).getOrDefault(PrimePresets.PrimeVioletGlass)
     }
 
     suspend fun update(transform: (CroixDesignState) -> CroixDesignState) {
         context.croixDesignStore.edit { prefs ->
             val current = prefs[key]?.let { CroixThemeJson.import(it).getOrNull() }
-                ?: PrimePresets.DeezerVioletGlass
+                ?: PrimePresets.PrimeVioletGlass
             prefs[key] = CroixThemeJson.export(transform(current).clamped())
         }
     }

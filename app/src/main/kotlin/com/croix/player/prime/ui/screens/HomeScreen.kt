@@ -70,7 +70,7 @@ fun HomeScreen(
     val palette = LocalCroixPalette.current
     val cardSize = when (design.cardDensity) {
         PrimeCardDensity.COMPACT -> 124.dp
-        PrimeCardDensity.DEEZER_EDITORIAL -> 148.dp
+        PrimeCardDensity.EDITORIAL -> 148.dp
         PrimeCardDensity.SPACIOUS -> 168.dp
     }
 

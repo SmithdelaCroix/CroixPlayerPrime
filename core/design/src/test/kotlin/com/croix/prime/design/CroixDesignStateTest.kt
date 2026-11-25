@@ -11,10 +11,10 @@ import org.junit.Test
 class CroixDesignStateTest {
     @Test
     fun `json export and import preserves full design state`() {
-        val custom = PrimePresets.YumaFrostedNeon.copy(
+        val custom = PrimePresets.FrostedNeonCyan.copy(
             presetName = "My Prime Mix",
             glassOpacity = 0.35f,
-            playerStyle = PrimePlayerStyle.DEEZER_TRANSLUCENT,
+            playerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
             progressStyle = PrimeProgressStyle.WAVEFORM,
         )
         val encoded = CroixThemeJson.export(custom)

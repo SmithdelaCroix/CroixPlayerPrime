@@ -12,15 +12,23 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -96,7 +104,16 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
         )
     }
 
-    val bottomClearance = if (playback.currentTrack != null) 190 else 110
+    val density = LocalDensity.current
+    val isKeyboardOpen = WindowInsets.ime.getBottom(density) > 0
+    val navBarInsetDp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding().value.toInt()
+    val bottomClearance = navBarInsetDp + if (playback.currentTrack != null && !isKeyboardOpen) {
+        (design.miniPlayerHeightDp + 126f).toInt()
+    } else if (!isKeyboardOpen) {
+        118
+    } else {
+        24
+    }
 
     CroixPrimeTheme(
         design = design,
@@ -163,35 +180,42 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 }
             }
 
-            // Floating Mini-Player + Floating Translucent Glass NavBar (blurs scrolling content underneath!)
-            Column(
+            // Floating Mini-Player + Floating Translucent Glass NavBar (hidden cleanly during IME typing or fullscreen player!)
+            AnimatedVisibility(
+                visible = !playerExpanded && !isKeyboardOpen,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .zIndex(5f)
                     .navigationBarsPadding(),
             ) {
-                if (playback.currentTrack != null) {
-                    MiniPlayerBar(
-                        playback = playback,
+                Column {
+                    if (playback.currentTrack != null) {
+                        MiniPlayerBar(
+                            playback = playback,
+                            hazeState = contentHazeState,
+                            onExpand = { playerExpanded = true },
+                            onTogglePlay = vm.playerController::togglePlayPause,
+                            onNext = vm.playerController::skipNext,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
+                    CroixNavigationBar(
+                        destinations = destinations,
+                        currentRoute = currentRoute,
                         hazeState = contentHazeState,
-                        onExpand = { playerExpanded = true },
-                        onTogglePlay = vm.playerController::togglePlayPause,
-                        onNext = vm.playerController::skipNext,
+                        onSelect = { currentRoute = it },
                     )
-                    Spacer(Modifier.height(6.dp))
                 }
-                CroixNavigationBar(
-                    destinations = destinations,
-                    currentRoute = currentRoute,
-                    hazeState = contentHazeState,
-                    onSelect = { currentRoute = it },
-                )
             }
 
-            // Fullscreen Translucent Now Playing Sheet
+            // Fullscreen Translucent Now Playing Sheet (strictly top zIndex + touch blocker)
             AnimatedVisibility(
                 visible = playerExpanded && playback.currentTrack != null,
                 enter = slideInVertically(initialOffsetY = { it }),
                 exit = slideOutVertically(targetOffsetY = { it }),
+                modifier = Modifier.zIndex(10f),
             ) {
                 BackHandler { playerExpanded = false }
                 NowPlayingOverlay(

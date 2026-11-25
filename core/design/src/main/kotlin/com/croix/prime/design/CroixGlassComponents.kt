@@ -76,7 +76,7 @@ data class CroixResolvedPalette(
     val textSecondary: Color,
 )
 
-val LocalCroixDesign = staticCompositionLocalOf { PrimePresets.DeezerVioletGlass }
+val LocalCroixDesign = staticCompositionLocalOf { PrimePresets.PrimeVioletGlass }
 val LocalCroixPalette = staticCompositionLocalOf {
     CroixResolvedPalette(
         primary = Color(0xFFA238FF),
@@ -112,23 +112,23 @@ fun CroixPrimeTheme(
     val safeDesign = design.clamped()
 
     val targetPrimary = when (safeDesign.colorMode) {
-        PrimeColorMode.DEEZER_VIOLET_GLASS -> Color(0xFFA238FF)
-        PrimeColorMode.YUMA_NEON_CYAN -> Color(0xFF00E5FF)
-        PrimeColorMode.ALBUM_ART_MORPH -> albumSeedPrimary ?: Color(0xFFA238FF)
-        PrimeColorMode.MATERIAL_YOU -> dynamicDarkColorScheme(context).primary
-        PrimeColorMode.AMOLED_GLASS -> albumSeedPrimary ?: Color(0xFFA238FF)
-        PrimeColorMode.CUSTOM_ACCENT -> safeDesign.customAccentColor
+        PrimeColorMode.VIOLET_GLASS -> Color(0xFFA238FF)
+        PrimeColorMode.NEON_CYAN -> Color(0xFF00E5FF)
+        PrimeColorMode.ALBUM_MORPH -> albumSeedPrimary ?: Color(0xFFA238FF)
+        PrimeColorMode.DYNAMIC_SYSTEM -> dynamicDarkColorScheme(context).primary
+        PrimeColorMode.AMOLED_BLACK -> albumSeedPrimary ?: Color(0xFFA238FF)
+        PrimeColorMode.CUSTOM_COLOR -> safeDesign.customAccentColor
     }
     val targetSecondary = when (safeDesign.colorMode) {
-        PrimeColorMode.DEEZER_VIOLET_GLASS -> Color(0xFFFF2E93)
-        PrimeColorMode.YUMA_NEON_CYAN -> Color(0xFF7C4DFF)
-        PrimeColorMode.ALBUM_ART_MORPH -> albumSeedSecondary ?: Color(0xFF00E5FF)
-        PrimeColorMode.MATERIAL_YOU -> dynamicDarkColorScheme(context).tertiary
-        PrimeColorMode.AMOLED_GLASS -> Color(0xFF3A3A48)
-        PrimeColorMode.CUSTOM_ACCENT -> safeDesign.secondaryAccentColor
+        PrimeColorMode.VIOLET_GLASS -> Color(0xFFFF2E93)
+        PrimeColorMode.NEON_CYAN -> Color(0xFF7C4DFF)
+        PrimeColorMode.ALBUM_MORPH -> albumSeedSecondary ?: Color(0xFF00E5FF)
+        PrimeColorMode.DYNAMIC_SYSTEM -> dynamicDarkColorScheme(context).tertiary
+        PrimeColorMode.AMOLED_BLACK -> Color(0xFF3A3A48)
+        PrimeColorMode.CUSTOM_COLOR -> safeDesign.secondaryAccentColor
     }
     val targetBg = when (safeDesign.colorMode) {
-        PrimeColorMode.AMOLED_GLASS -> Color.Black
+        PrimeColorMode.AMOLED_BLACK -> Color.Black
         else -> Color(0xFF09080F)
     }
 

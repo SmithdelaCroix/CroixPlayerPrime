@@ -142,7 +142,7 @@ fun CroixStudioScreen(
                             }
                         }
                         1 -> {
-                            StudioEnumRow("Color Engine", PrimeColorMode.entries, design.colorMode) { m ->
+                            StudioEnumRow("Color Engine", PrimeColorMode.entries, design.colorMode, { it.label }) { m ->
                                 onUpdateDesign { it.copy(colorMode = m) }
                             }
                             Text("Custom Accent Color", color = Color.White, fontWeight = FontWeight.SemiBold)
@@ -156,14 +156,14 @@ fun CroixStudioScreen(
                                             .background(Color(argb))
                                             .border(if (design.customAccentArgb == argb) 2.5.dp else 0.dp, Color.White, CircleShape)
                                             .clickable {
-                                                onUpdateDesign { it.copy(colorMode = PrimeColorMode.CUSTOM_ACCENT, customAccentArgb = argb) }
+                                                onUpdateDesign { it.copy(colorMode = PrimeColorMode.CUSTOM_COLOR, customAccentArgb = argb) }
                                             },
                                     )
                                 }
                             }
                         }
                         2 -> {
-                            StudioSwitch("Show Croix Flow Hero (Deezer)", design.showCroixFlowHero) { v ->
+                            StudioSwitch("Show Croix Flow Hero", design.showCroixFlowHero) { v ->
                                 onUpdateDesign { it.copy(showCroixFlowHero = v) }
                             }
                             StudioSwitch("Show Mood Chips", design.showMoodChips) { v ->
@@ -172,10 +172,10 @@ fun CroixStudioScreen(
                             StudioSwitch("Show Jump Back In", design.showRecentSection) { v ->
                                 onUpdateDesign { it.copy(showRecentSection = v) }
                             }
-                            StudioEnumRow("Card Density", PrimeCardDensity.entries, design.cardDensity) { d ->
+                            StudioEnumRow("Card Density", PrimeCardDensity.entries, design.cardDensity, { it.label }) { d ->
                                 onUpdateDesign { it.copy(cardDensity = d) }
                             }
-                            StudioEnumRow("Nav Bar Style", PrimeNavBarStyle.entries, design.navBarStyle) { n ->
+                            StudioEnumRow("Nav Bar Style", PrimeNavBarStyle.entries, design.navBarStyle, { it.label }) { n ->
                                 onUpdateDesign { it.copy(navBarStyle = n) }
                             }
                             StudioSwitch("Show Nav Bar Labels", design.showNavLabels) { v ->
@@ -189,10 +189,10 @@ fun CroixStudioScreen(
                             }
                         }
                         3 -> {
-                            StudioEnumRow("Player Layout", PrimePlayerStyle.entries, design.playerStyle) { s ->
+                            StudioEnumRow("Player Layout", PrimePlayerStyle.entries, design.playerStyle, { it.label }) { s ->
                                 onUpdateDesign { it.copy(playerStyle = s) }
                             }
-                            StudioEnumRow("Progress Bar", PrimeProgressStyle.entries, design.progressStyle) { p ->
+                            StudioEnumRow("Progress Bar", PrimeProgressStyle.entries, design.progressStyle, { it.label }) { p ->
                                 onUpdateDesign { it.copy(progressStyle = p) }
                             }
                             StudioSlider("Artwork Corner Radius", design.artworkCornerDp, 0f..36f, "${design.artworkCornerDp.roundToInt()} dp") { v ->
@@ -204,7 +204,7 @@ fun CroixStudioScreen(
                             StudioSlider("Control Dock Opacity", design.playerControlDockOpacity, 0.05f..0.80f, "${(design.playerControlDockOpacity * 100).roundToInt()}%") { v ->
                                 onUpdateDesign { it.copy(playerControlDockOpacity = v) }
                             }
-                            StudioEnumRow("Lyrics Alignment", PrimeLyricsAlign.entries, design.lyricsAlign) { a ->
+                            StudioEnumRow("Lyrics Alignment", PrimeLyricsAlign.entries, design.lyricsAlign, { it.label }) { a ->
                                 onUpdateDesign { it.copy(lyricsAlign = a) }
                             }
                             StudioSlider("Lyrics Font Size", design.lyricsFontSizeSp, 16f..36f, "${design.lyricsFontSizeSp.roundToInt()} sp") { v ->
@@ -327,6 +327,7 @@ private fun <T : Enum<T>> StudioEnumRow(
     title: String,
     entries: List<T>,
     selected: T,
+    labelOf: (T) -> String,
     onSelect: (T) -> Unit,
 ) {
     val palette = LocalCroixPalette.current
@@ -343,7 +344,7 @@ private fun <T : Enum<T>> StudioEnumRow(
                     onClick = { onSelect(item) },
                 ) {
                     Text(
-                        text = item.name.replace('_', ' '),
+                        text = labelOf(item),
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),

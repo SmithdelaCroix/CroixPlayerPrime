@@ -52,7 +52,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     val designState: StateFlow<CroixDesignState> = designRepo.designFlow.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
-        PrimePresets.DeezerVioletGlass,
+        PrimePresets.PrimeVioletGlass,
     )
 
     val playerController = CroixPlayerController(

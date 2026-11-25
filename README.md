@@ -1,10 +1,10 @@
-# Croix Player Prime (`v4.0.0-prime`)
+# Croix Player Prime (`v4.0.1-prime`)
 
 Reproductor de música Android 12+ (`arm64-v8a` — ARMv8 / ARMv9) construido desde cero **100% en español**, con estética editorial + Glassmorphism translúcido a 120fps, motor multi-cliente sin anuncios, algoritmo híbrido con Spotify, reconocimiento acústico tipo Shazam, Audio Espacial 8D y firma digital permanente para actualizaciones directas sin conflicto de paquetes.
 
-## Descargar APK Directo (`v4.0.0-prime` — ARM64 Firma Permanente)
+## Descargar APK Directo (`v4.0.1-prime` — ARM64 Firma Permanente)
 
-- **Descarga directa (`v4.0.0-prime`, sin ZIP)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/v4.0.0-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
+- **Descarga directa (`v4.0.1-prime`, sin ZIP)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/v4.0.1-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
 - **Enlace permanente siempre actualizado (`latest-prime`)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/latest-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
 - **Todas las versiones (GitHub Releases)**: https://github.com/SmithdelaCroix/CroixPlayerPrime/releases
 

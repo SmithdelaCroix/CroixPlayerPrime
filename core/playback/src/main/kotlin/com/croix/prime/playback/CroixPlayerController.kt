@@ -21,6 +21,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.croix.prime.engine.HybridAlgorithmEngine
 import com.croix.prime.engine.InnerTubeClient
 import com.croix.prime.engine.ResolvedStream
 import com.croix.prime.engine.SponsorBlockClient
@@ -123,6 +124,7 @@ class CroixPlayerController(
     private val crossfadeSecondsProvider: () -> Int = { 0 },
     private val normalizeAudioProvider: () -> Boolean = { true },
     private val autoPlayRelatedProvider: () -> Boolean = { true },
+    private val blockedArtistKeysProvider: () -> Set<String> = { emptySet() },
     private val autoOutputProfileResolver: (AudioOutputRoute) -> AutoEqHeadphoneProfile? = { null },
 ) {
     private val appContext = context.applicationContext
@@ -306,11 +308,38 @@ class CroixPlayerController(
 
         if (autoFetchRadio && queueList.size <= 3) {
             scope.launch {
-                val radio = innerTube.fetchRadioQueue(track.id)
-                if (radio.isNotEmpty()) {
+                val blocked = blockedArtistKeysProvider()
+                val rawRadio = innerTube.fetchRadioQueue(track.id, limit = 22)
+                var filtered = HybridAlgorithmEngine.filterRelatedRadioTracks(
+                    candidates = rawRadio,
+                    existingQueue = _state.value.queue,
+                    blockedArtistKeys = blocked,
+                )
+                if (filtered.size < 4 && track.artist.isNotBlank()) {
+                    val primaryArtist = track.artist.split(",", "&", "feat.", "ft.", ignoreCase = true).firstOrNull()?.trim().orEmpty()
+                    if (primaryArtist.isNotBlank()) {
+                        val fallback = innerTube.searchSongs("$primaryArtist canciones populares mix", limit = 16)
+                        filtered = filtered + HybridAlgorithmEngine.filterRelatedRadioTracks(
+                            candidates = fallback,
+                            existingQueue = _state.value.queue + filtered,
+                            blockedArtistKeys = blocked,
+                        )
+                    }
+                }
+                if (filtered.isNotEmpty() && _state.value.currentTrack?.id == track.id) {
                     _state.update { cur ->
-                        val existingIds = cur.queue.map { it.id }.toSet()
-                        cur.copy(queue = cur.queue + radio.filter { it.id !in existingIds })
+                        val cleanToAdd = HybridAlgorithmEngine.filterRelatedRadioTracks(
+                            candidates = filtered,
+                            existingQueue = cur.queue,
+                            blockedArtistKeys = blocked,
+                        )
+                        cur.copy(queue = cur.queue + cleanToAdd)
+                    }
+                    // Prefetch the very next radio track so advancing is instantaneous
+                    filtered.firstOrNull()?.let { nextTrack ->
+                        if (localFileProvider(nextTrack.id) == null) {
+                            launch(Dispatchers.IO) { innerTube.prefetchAudioStream(nextTrack.id) }
+                        }
                     }
                 }
             }
@@ -561,13 +590,18 @@ class CroixPlayerController(
                     if (nextTrack != null && localFileProvider(nextTrack.id) == null) {
                         innerTube.prefetchAudioStream(nextTrack.id)
                     }
-                    // Smart Autoplay: keep queue alive when approaching the last 2 tracks
+                    // Smart Autoplay: keep queue alive when approaching the last 2 tracks (excluding duplicate song titles & blocked artists)
                     if (autoPlayRelatedProvider() && q.size - nextIdx <= 2) {
-                        val more = innerTube.fetchRadioQueue(track.id, limit = 12)
+                        val more = innerTube.fetchRadioQueue(track.id, limit = 16)
                         if (more.isNotEmpty()) {
+                            val blocked = blockedArtistKeysProvider()
                             _state.update { cur ->
-                                val seen = cur.queue.map { it.id }.toSet()
-                                cur.copy(queue = cur.queue + more.filter { it.id !in seen })
+                                val filteredMore = HybridAlgorithmEngine.filterRelatedRadioTracks(
+                                    candidates = more,
+                                    existingQueue = cur.queue,
+                                    blockedArtistKeys = blocked,
+                                )
+                                cur.copy(queue = cur.queue + filteredMore)
                             }
                         }
                     }

@@ -157,6 +157,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         crossfadeSecondsProvider = { designState.value.crossfadeSeconds },
         normalizeAudioProvider = { designState.value.normalizeAudio },
         autoPlayRelatedProvider = { designState.value.autoPlayRelated },
+        blockedArtistKeysProvider = { blockedArtists.value.map { it.artistKey }.toSet() },
         autoOutputProfileResolver = { route ->
             val cfg = designState.value
             if (!cfg.autoOutputProfilesEnabled) null

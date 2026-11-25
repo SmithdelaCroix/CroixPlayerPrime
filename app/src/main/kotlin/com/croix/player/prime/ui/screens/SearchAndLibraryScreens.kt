@@ -269,7 +269,8 @@ fun SearchScreen(
                                 isFavorite = track.id in favoriteIds,
                                 isDownloaded = track.id in downloadedIds,
                                 downloadingProgress = downloadProgress[track.id],
-                                onPlay = { onPlayTrack(track, results) },
+                                // Start smart radio from the chosen track instead of queueing identically named search results
+                                onPlay = { onPlayTrack(track, listOf(track)) },
                                 onToggleFavorite = { onToggleFavorite(track) },
                                 onOpenMenu = { onOpenTrackMenu(track) },
                             )

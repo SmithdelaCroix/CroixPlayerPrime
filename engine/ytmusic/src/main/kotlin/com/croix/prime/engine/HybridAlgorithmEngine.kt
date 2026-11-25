@@ -365,9 +365,52 @@ class HybridAlgorithmEngine(
         .take(limit)
 
     companion object {
+        private val TITLE_NOISE_REGEX = Regex(
+            """\s*[\(\[](?:official|video|audio|lyrics?|letra|visualizer|hd|4k|hq|remaster(?:ed)?|live|en vivo|topic|mv|music video|explicit|clean).*?[\)\]]""",
+            RegexOption.IGNORE_CASE,
+        )
+        private val NON_ALNUM_REGEX = Regex("""[^\p{L}\p{N}]+""")
+
         fun normalizeArtistKey(raw: String): String =
             raw.split(",", "&", "feat.", "ft.", ignoreCase = true)
                 .firstOrNull()?.trim()?.lowercase().orEmpty()
+
+        fun normalizeTitleKey(rawTitle: String): String {
+            val stripped = rawTitle.replace(TITLE_NOISE_REGEX, " ")
+            return NON_ALNUM_REGEX.replace(stripped.lowercase(), " ").trim()
+        }
+
+        fun isSameSongVariant(a: Track, b: Track): Boolean {
+            if (a.id == b.id) return true
+            val titleA = normalizeTitleKey(a.title)
+            val titleB = normalizeTitleKey(b.title)
+            if (titleA.isBlank() || titleB.isBlank()) return false
+            if (titleA == titleB) return true
+            val artistA = normalizeArtistKey(a.artist)
+            val artistB = normalizeArtistKey(b.artist)
+            if (artistA.isNotBlank() && artistA == artistB && (titleA.contains(titleB) || titleB.contains(titleA))) {
+                return true
+            }
+            return false
+        }
+
+        fun filterRelatedRadioTracks(
+            candidates: List<Track>,
+            existingQueue: List<Track>,
+            blockedArtistKeys: Set<String> = emptySet(),
+        ): List<Track> {
+            val accepted = mutableListOf<Track>()
+            val existingIds = existingQueue.map { it.id }.toHashSet()
+            for (cand in candidates) {
+                if (cand.id in existingIds) continue
+                if (isBlockedArtist(cand.artist, blockedArtistKeys)) continue
+                if (existingQueue.any { isSameSongVariant(it, cand) }) continue
+                if (accepted.any { isSameSongVariant(it, cand) }) continue
+                existingIds.add(cand.id)
+                accepted.add(cand)
+            }
+            return accepted
+        }
 
         fun isBlockedArtist(artistRaw: String, blockedArtistKeys: Set<String>): Boolean {
             if (blockedArtistKeys.isEmpty() || artistRaw.isBlank()) return false

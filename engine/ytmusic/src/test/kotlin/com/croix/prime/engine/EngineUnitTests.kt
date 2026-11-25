@@ -118,4 +118,23 @@ class EngineUnitTests {
         assertEquals(1, gems.size)
         assertEquals("t3", gems.first().id)
     }
+
+    @Test
+    fun `related radio filter skips identically named uploads and blocked artists`() {
+        val played = Track("v1", "Blinding Lights", "The Weeknd")
+        val candidates = listOf(
+            Track("v2", "Blinding Lights (Official Video)", "The Weeknd"),
+            Track("v3", "Blinding Lights (Lyrics)", "Pop Lyrics Channel"),
+            Track("v4", "Save Your Tears", "The Weeknd"),
+            Track("v5", "Save Your Tears (Official Audio)", "The Weeknd"),
+            Track("v6", "Starboy", "Blocked Artist"),
+            Track("v7", "After Hours", "The Weeknd"),
+        )
+        val filtered = HybridAlgorithmEngine.filterRelatedRadioTracks(
+            candidates = candidates,
+            existingQueue = listOf(played),
+            blockedArtistKeys = setOf("blocked artist"),
+        )
+        assertEquals(listOf("v4", "v7"), filtered.map { it.id })
+    }
 }

@@ -30,6 +30,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Read App Version
+        id: ver
+        run: |
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -n 1)
+          VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -n 1)
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "Detected version: v${VERSION_NAME} (code ${VERSION_CODE})"
+
       - name: Prepare Digital Signing Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -78,18 +87,35 @@ jobs:
           path: CroixPlayerPrime-arm64-v8a-signed.apk
           retention-days: 30
 
-      - name: Publish Direct Signed APK to GitHub Release (No ZIP)
+      - name: Publish Direct Signed APK to GitHub Releases (Versioned + Latest)
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.ver.outputs.version_name }}
+          VERSION_CODE: ${{ steps.ver.outputs.version_code }}
         run: |
-          TAG="latest-prime"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" CroixPlayerPrime-arm64-v8a-signed.apk --clobber
-            gh release edit "$TAG" --title "Croix Player Prime (Latest ARM64 APK)" --notes "Direct signed ARM64 (ARMv8/ARMv9) Android 12+ APK built from commit ${GITHUB_SHA::7}." --latest
+          VER_TAG="v${VERSION_NAME}"
+          TITLE="Croix Player Prime ${VER_TAG} (ARM64 Signed APK)"
+          NOTES="Croix Player Prime ${VER_TAG} (versionCode ${VERSION_CODE}) — APK firmado ARM64 (ARMv8/ARMv9) para Android 12+ compilado desde el commit ${GITHUB_SHA::7}. Firma RSA-4096 permanente para actualizaciones directas sin conflicto de paquetes."
+
+          # 1. Update rolling latest-prime tag & release so permanent direct URL always points to newest APK
+          git tag -f latest-prime "${GITHUB_SHA}"
+          git push origin refs/tags/latest-prime --force
+          if gh release view "latest-prime" >/dev/null 2>&1; then
+            gh release upload "latest-prime" CroixPlayerPrime-arm64-v8a-signed.apk --clobber
+            gh release edit "latest-prime" --title "${TITLE}" --notes "${NOTES}" --latest=false
           else
-            gh release create "$TAG" CroixPlayerPrime-arm64-v8a-signed.apk \
-              --title "Croix Player Prime (Latest ARM64 APK)" \
-              --notes "Direct signed ARM64 (ARMv8/ARMv9) Android 12+ APK built from commit ${GITHUB_SHA::7}." \
-              --latest
+            gh release create "latest-prime" CroixPlayerPrime-arm64-v8a-signed.apk \
+              --title "${TITLE}" --notes "${NOTES}" --latest=false
+          fi
+
+          # 2. Publish/Update explicit versioned release (e.g. v4.0.0-prime) and mark it as Latest!
+          git tag -f "${VER_TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${VER_TAG}" --force
+          if gh release view "${VER_TAG}" >/dev/null 2>&1; then
+            gh release upload "${VER_TAG}" CroixPlayerPrime-arm64-v8a-signed.apk --clobber
+            gh release edit "${VER_TAG}" --title "${TITLE}" --notes "${NOTES}" --latest
+          else
+            gh release create "${VER_TAG}" CroixPlayerPrime-arm64-v8a-signed.apk \
+              --title "${TITLE}" --notes "${NOTES}" --latest
           fi

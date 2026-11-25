@@ -29,6 +29,7 @@
             android:name=".IconVioletAlias"
             android:enabled="true"
             android:exported="true"
+            android:label="@string/app_name"
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher_round"
             android:targetActivity=".MainActivity">
@@ -42,6 +43,7 @@
             android:name=".IconCyanAlias"
             android:enabled="false"
             android:exported="true"
+            android:label="@string/app_name"
             android:icon="@mipmap/ic_launcher_cyan"
             android:roundIcon="@mipmap/ic_launcher_cyan"
             android:targetActivity=".MainActivity">
@@ -55,6 +57,7 @@
             android:name=".IconObsidianAlias"
             android:enabled="false"
             android:exported="true"
+            android:label="@string/app_name"
             android:icon="@mipmap/ic_launcher_obsidian"
             android:roundIcon="@mipmap/ic_launcher_obsidian"
             android:targetActivity=".MainActivity">
@@ -68,6 +71,7 @@
             android:name=".IconEmeraldAlias"
             android:enabled="false"
             android:exported="true"
+            android:label="@string/app_name"
             android:icon="@mipmap/ic_launcher_emerald"
             android:roundIcon="@mipmap/ic_launcher_emerald"
             android:targetActivity=".MainActivity">

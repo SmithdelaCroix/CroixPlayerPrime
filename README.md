@@ -1,19 +1,27 @@
-# Croix Player Prime (`v3.0.0-prime`)
+# Croix Player Prime (`v4.0.0-prime`)
 
-Reproductor de música Android 12+ (`arm64-v8a` — ARMv8 / ARMv9) construido desde cero en español, con estética editorial + Glassmorphism translúcido a 120fps, motor de reproducción multi-cliente sin anuncios, precarga instantánea, algoritmo híbrido con Spotify y firma digital permanente para actualizaciones directas sin conflicto de paquetes.
+Reproductor de música Android 12+ (`arm64-v8a` — ARMv8 / ARMv9) construido desde cero **100% en español**, con estética editorial + Glassmorphism translúcido a 120fps, motor multi-cliente sin anuncios, algoritmo híbrido con Spotify, reconocimiento acústico tipo Shazam, Audio Espacial 8D y firma digital permanente para actualizaciones directas sin conflicto de paquetes.
 
-## Descargar APK Directo (`v3.0.0-prime` — ARM64 Firma Permanente)
+## Descargar APK Directo (`v4.0.0-prime` — ARM64 Firma Permanente)
 
-- **Descarga directa (Último APK firmado, sin ZIP)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/latest-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
+- **Descarga directa (`v4.0.0-prime`, sin ZIP)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/v4.0.0-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
+- **Enlace permanente siempre actualizado (`latest-prime`)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/latest-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
 - **Todas las versiones (GitHub Releases)**: https://github.com/SmithdelaCroix/CroixPlayerPrime/releases
 
-> **Nota al actualizar por primera vez a `v3.0.0-prime`**: A partir de esta versión se utiliza una **clave de firma RSA-4096 permanente**. Si tienes instalada una versión anterior (`v2.x`), desinstálala **una sola vez** antes de instalar `v3.0.0-prime`; a partir de ahí todas las futuras actualizaciones se instalarán directamente encima sin conflicto de paquetes ni pérdida de datos.
+> **Actualización directa sin pérdida de datos**: Firmado con clave RSA-4096 permanente y migración de base de datos Room `v3 → v4`. Si ya tienes instalada la `v3.0.0-prime`, instala `v4.0.0-prime` encima y conservarás todos tus favoritos, playlists, descargas e historial.
 
-## Novedades (`v3.0.0-prime`)
-- **Motor de Reproducción Turbo**: Cadena completa de 13 clientes YouTube 2026 (`VISIONOS`, `ANDROID_VR`, `IOS`, `IOS_MUSIC`, `ANDROID_MUSIC`, etc.), **precarga anticipada de la siguiente canción**, buffers de inicio rápido (`1s`), normalización automática de volumen (`loudnessDb`), calidad de audio seleccionable (*Máxima / Balanceada / Ahorro*), Autoplay inteligente y recuperación automática.
-- **Algoritmo de Recomendaciones Renovado**: Puntuación ponderada por historial + recencia + favoritos + Spotify que genera **Mixes Diarios**, **Selección Rápida**, **Para Redescubrir**, **Artistas para ti** y **Flow Infinito por estado de ánimo**.
-- **Inicio Editorial Translúcido**: Saludo dinámico, **Rueda FLOW interactiva** con selector de estados de ánimo integrado, cuadrícula rápida 2x3, pósters de Mixes Diarios, carrusel de 4 filas de Selección Rápida y avatares circulares de artistas.
-- **Configuración Agrupada y Estudio Profundo**: Menú de configuración segmentado por categorías con animaciones de presión, **Vista Previa en vivo** en el Estudio de Apariencia (6 pestañas, saturación + tono dual, escala tipográfica, AMOLED negro puro, 8 presets), **100% en Español** y verificador de actualizaciones integrado.
+## Novedades (`v4.0.0-prime`)
+- **Reconocimiento de música tipo Shazam**: Huella acústica FFT en vivo desde el micrófono (`16 kHz`) con radar animado en **Inicio** y **Buscar** que identifica y reproduce la canción al instante.
+- **Letras Multi-fuente + Traducción + Romanización + Tarjeta PNG**: Cascada **LRCLib → Spotify Color-Lyrics → YouTube Music**, traducción al español en vivo, romanización offline (Coreano, Japonés y Ruso), ajuste de desfase (`±0.5s`) y exportación de **Tarjetas de Letras Glassmorphism en PNG**.
+- **Caché Inteligente de Audio LRU (`SimpleCache`)**: Guarda canciones escuchadas por `videoId` para reproducción instantánea sin volver a gastar datos (`Off / 256 MB / 512 MB / 1 GB / 2 GB` + vaciado en 1 toque).
+- **Audio Espacial 8D real + Reverb + AutoEq + Perfiles por Salida**: Procesador PCM estéreo 8D orbital en Media3, Reverb por hardware, perfiles **AutoEq** para audífonos (*AirPods Pro, Sony WH/WF-1000XM, Galaxy Buds Pro, JBL, Bose QC, KZ / IEM Estudio*) y cambio automático según la salida conectada (*Bluetooth / Cable-USB / Altavoz*).
+- **Discord Rich Presence + Scrobbling (Last.fm / ListenBrainz)**: Presencia en vivo por WebSocket Gateway v10 y scrobbling automático (pausados en Sesión Privada).
+- **Recibo Musical PNG + Estadísticas por hora y día**: Gráficas por hora del día (`00h–23h`) y día de la semana (`Lun–Dom`) + tarjeta **CROIX RECEIPT** compartible en PNG.
+- **Historial por fechas + Bloqueo de Artistas**: Pestaña **Historial** (*Hoy / Ayer / Esta semana / Anteriores*) y bloqueo de artistas desde `⋮` o su perfil para excluirlos de Inicio, Mixes, Flow y Radar.
+- **Cola Pro**: Reordenar pistas arriba/abajo, eliminar duplicados y guardar la cola como playlist.
+- **Radar de Joyas Ocultas**: Modo descubrimiento puro en Inicio excluyendo el 100% de temas ya escuchados o en favoritos.
+- **Inspector Técnico de Audio en vivo**: Toca el códec/bitrate en el reproductor para inspeccionar códec, MIME, bitrate, `loudnessDb`, origen (*Caché / Offline / Directo / Relay*), cliente motor, salida y DSP activo.
+- **Canvas animado + Carátula 3D Parallax (giroscopio) + 4 Íconos de App + Sesión Privada (Incógnito)**.
 
 ## Licencia
 GPL-3.0

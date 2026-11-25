@@ -4,12 +4,16 @@
 
 package com.croix.player.prime
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -42,6 +46,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddToQueue
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Home
@@ -65,10 +70,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
 import com.croix.player.prime.ui.CroixPrimeViewModel
 import com.croix.player.prime.ui.screens.AlbumDetailOverlay
 import com.croix.player.prime.ui.screens.ArtistProfileOverlay
@@ -78,6 +85,7 @@ import com.croix.player.prime.ui.screens.MiniPlayerBar
 import com.croix.player.prime.ui.screens.NowPlayingOverlay
 import com.croix.player.prime.ui.screens.SearchScreen
 import com.croix.player.prime.ui.screens.SettingsAndStudioOverlay
+import com.croix.player.prime.ui.screens.ShazamRadarOverlay
 import com.croix.player.prime.ui.screens.SpotifyLoginOverlay
 import com.croix.player.prime.ui.screens.YtMusicLoginOverlay
 import com.croix.prime.design.CroixAnimatedBackdrop
@@ -87,6 +95,7 @@ import com.croix.prime.design.CroixNavigationBar
 import com.croix.prime.design.CroixPrimeTheme
 import com.croix.prime.design.LocalCroixStrings
 import com.croix.prime.design.PrimeTransitionStyle
+import com.croix.prime.engine.HybridAlgorithmEngine
 import com.croix.prime.engine.Track
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
@@ -109,13 +118,17 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
+    val context = LocalContext.current
     val design by vm.designState.collectAsState()
     val playback by vm.playbackState.collectAsState()
     val homeFeed by vm.homeFeed.collectAsState()
     val homeLoading by vm.homeLoading.collectAsState()
+    val hiddenGemsLoading by vm.hiddenGemsLoading.collectAsState()
     val updateInfo by vm.updateInfo.collectAsState()
     val favorites by vm.favorites.collectAsState()
     val history by vm.history.collectAsState()
+    val historyEntities by vm.historyEntities.collectAsState()
+    val blockedArtists by vm.blockedArtists.collectAsState()
     val downloads by vm.downloads.collectAsState()
     val downloadProgress by vm.downloadProgress.collectAsState()
     val playlists by vm.playlists.collectAsState()
@@ -131,6 +144,8 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val importStatus by vm.importStatus.collectAsState()
     val lyrics by vm.lyrics.collectAsState()
     val lyricsLoading by vm.lyricsLoading.collectAsState()
+    val translatedLyrics by vm.translatedLyrics.collectAsState()
+    val translatingLyrics by vm.translatingLyrics.collectAsState()
     val albumPrimary by vm.albumPrimary.collectAsState()
     val albumSecondary by vm.albumSecondary.collectAsState()
     val artistProfile by vm.artistProfile.collectAsState()
@@ -142,6 +157,8 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val adsBlockedCount by vm.adsBlockedCount.collectAsState()
     val spotifySyncing by vm.spotifySyncing.collectAsState()
     val serverNotice by vm.serverNotice.collectAsState()
+    val audioCacheBytes by vm.audioCacheBytes.collectAsState()
+    val shazamState by vm.shazamState.collectAsState()
 
     var currentRoute by remember { mutableStateOf("home") }
     var playerExpanded by remember { mutableStateOf(false) }
@@ -152,11 +169,32 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var quickNewPlaylistName by remember { mutableStateOf("") }
 
+    // Runtime Microphone Permission Launcher for Shazam Recognition
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            vm.startShazamListening()
+        }
+    }
+
+    fun triggerShazamListen() {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            vm.startShazamListening()
+        } else {
+            vm.openShazam()
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
     // SINGLE HazeState strictly for the floating MiniPlayerBar & NavBar (120fps zero-lag!)
     val contentHazeState = remember { HazeState() }
 
     val favoriteIds = remember(favorites) { favorites.map { it.id }.toSet() }
     val downloadedIds = remember(downloads) { downloads.map { it.id }.toSet() }
+    val blockedKeys = remember(blockedArtists) { blockedArtists.map { it.artistKey }.toSet() }
 
     val density = LocalDensity.current
     val isKeyboardOpen = WindowInsets.ime.getBottom(density) > 0
@@ -232,15 +270,25 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                                 moods = vm.moods,
                                 favoriteIds = favoriteIds,
                                 spotifyConnected = serverState.isSpotifyConnected,
+                                privateSessionEnabled = design.privateSessionEnabled,
+                                hiddenGemsLoading = hiddenGemsLoading,
                                 isLoading = homeLoading,
                                 bottomPaddingDp = bottomClearance,
                                 onPlayFlow = vm::startCroixFlow,
+                                onStartHiddenGems = vm::startHiddenGemsRadar,
+                                onOpenShazam = { triggerShazamListen() },
+                                onTogglePrivateSession = {
+                                    vm.updateDesign { it.copy(privateSessionEnabled = !it.privateSessionEnabled) }
+                                },
                                 onPlayTrack = vm::playTrack,
                                 onToggleFavorite = vm::toggleFavorite,
                                 onOpenTrackMenu = { trackForMenu = it },
                                 onOpenArtist = { name, bid -> vm.openArtist(name, bid) },
                                 onRefresh = vm::refreshHome,
-                                onOpenSettings = { settingsOpen = true },
+                                onOpenSettings = {
+                                    vm.refreshCacheSize()
+                                    settingsOpen = true
+                                },
                             )
                             "search" -> SearchScreen(
                                 query = searchQuery,
@@ -263,10 +311,15 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                                 onOpenTrackMenu = { trackForMenu = it },
                                 onOpenArtist = { name, bid -> vm.openArtist(name, bid) },
                                 onOpenAlbum = vm::openAlbum,
-                                onOpenSettings = { settingsOpen = true },
+                                onOpenShazam = { triggerShazamListen() },
+                                onOpenSettings = {
+                                    vm.refreshCacheSize()
+                                    settingsOpen = true
+                                },
                             )
                             "favorites" -> FavoritesScreen(
                                 favorites = favorites,
+                                historyEntities = historyEntities,
                                 downloads = downloads,
                                 playlists = playlists,
                                 playlistTracks = playlistTracks,
@@ -281,18 +334,22 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                                 onImportPlaylistUrl = vm::importPlaylistUrl,
                                 onClearImportStatus = vm::clearImportStatus,
                                 onDeletePlaylist = vm::deletePlaylist,
+                                onShareMusicalReceipt = vm::shareMusicalReceipt,
                                 onOpenTrackMenu = { trackForMenu = it },
                                 onOpenArtist = { vm.openArtist(it) },
-                                onOpenSettings = { settingsOpen = true },
+                                onOpenSettings = {
+                                    vm.refreshCacheSize()
+                                    settingsOpen = true
+                                },
                             )
                         }
                     }
                 }
             }
 
-            // Spotify-Style Translucent Artist Profile Overlay
+            // Translucent Artist Profile Overlay
             AnimatedVisibility(
-                visible = artistProfile != null && albumDetail == null && !playerExpanded && !settingsOpen,
+                visible = artistProfile != null && albumDetail == null && !playerExpanded && !settingsOpen && !shazamState.isOpen,
                 enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
                     slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 5 } +
                     scaleIn(tween(300, easing = FastOutSlowInEasing), initialScale = 0.97f),
@@ -303,12 +360,18 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 val prof = artistProfile
                 if (prof != null) {
                     BackHandler { vm.closeArtist() }
+                    val isBlocked = HybridAlgorithmEngine.isBlockedArtist(prof.name, blockedKeys)
                     ArtistProfileOverlay(
                         profile = prof,
                         isLoading = artistLoading,
                         favoriteIds = favoriteIds,
+                        isArtistBlocked = isBlocked,
                         bottomPaddingDp = bottomClearance,
                         onClose = vm::closeArtist,
+                        onToggleBlockArtist = { name ->
+                            if (isBlocked) vm.unblockArtist(HybridAlgorithmEngine.normalizeArtistKey(name))
+                            else vm.blockArtist(name)
+                        },
                         onPlayTrack = vm::playTrack,
                         onToggleFavorite = vm::toggleFavorite,
                         onOpenTrackMenu = { trackForMenu = it },
@@ -320,7 +383,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
 
             // Album / Single Detail Overlay
             AnimatedVisibility(
-                visible = albumDetail != null && !playerExpanded && !settingsOpen,
+                visible = albumDetail != null && !playerExpanded && !settingsOpen && !shazamState.isOpen,
                 enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
                     slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 5 } +
                     scaleIn(tween(300, easing = FastOutSlowInEasing), initialScale = 0.97f),
@@ -346,7 +409,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
 
             // Floating Mini-Player + 3-Tab Glass NavBar (the ONLY real Haze blur targets -> 120fps!)
             AnimatedVisibility(
-                visible = !playerExpanded && !settingsOpen && !isKeyboardOpen,
+                visible = !playerExpanded && !settingsOpen && !shazamState.isOpen && !isKeyboardOpen,
                 enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) +
                     slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it / 2 },
                 exit = fadeOut(tween(180, easing = FastOutSlowInEasing)) +
@@ -383,7 +446,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
 
             // Fullscreen Translucent Now Playing Overlay
             AnimatedVisibility(
-                visible = playerExpanded && !settingsOpen && playback.currentTrack != null,
+                visible = playerExpanded && !settingsOpen && !shazamState.isOpen && playback.currentTrack != null,
                 enter = fadeIn(tween(240, easing = FastOutSlowInEasing)) +
                     slideInVertically(tween(340, easing = FastOutSlowInEasing)) { it },
                 exit = fadeOut(tween(200, easing = FastOutSlowInEasing)) +
@@ -396,6 +459,8 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     positionMsFlow = vm.positionMs,
                     lyrics = lyrics,
                     lyricsLoading = lyricsLoading,
+                    translatedLyrics = translatedLyrics,
+                    translatingLyrics = translatingLyrics,
                     isFavorite = playback.currentTrack?.id in favoriteIds,
                     isDownloaded = playback.currentTrack?.id in downloadedIds,
                     downloadProgress = playback.currentTrack?.id?.let { downloadProgress[it] },
@@ -417,20 +482,33 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     },
                     onSelectQueueIndex = vm.playerController::playAtIndex,
                     onRemoveQueueIndex = vm.playerController::removeFromQueue,
+                    onMoveQueueItem = vm.playerController::moveQueueItem,
+                    onDeduplicateQueue = vm.playerController::deduplicateQueue,
+                    onSaveQueueAsPlaylist = vm::saveCurrentQueueAsPlaylist,
+                    onTranslateLyrics = vm::translateCurrentLyrics,
+                    onAdjustLyricsOffset = { ms -> vm.updateDesign { it.copy(lyricsOffsetMs = ms) } },
+                    onShareLyricCard = vm::shareLyricCard,
                     onSetSleepTimer = vm.playerController::startSleepTimer,
                     onSetSpeed = vm.playerController::setPlaybackSpeed,
                     onSetPitch = vm.playerController::setPlaybackPitch,
                     onSetSkipSilence = vm.playerController::setSkipSilence,
+                    onSetAudio8dEnabled = vm.playerController::setAudio8dEnabled,
+                    onSetAudio8dSpeed = vm.playerController::setAudio8dSpeed,
+                    onSetReverbMode = vm.playerController::setReverbMode,
+                    onApplyAutoEq = vm.playerController::applyAutoEqProfile,
                     onSetEqEnabled = vm.playerController::setEqEnabled,
                     onApplyEqPreset = vm.playerController::applyEqPreset,
                     onSetEqBand = vm.playerController::setEqBand,
                     onSetBassBoost = vm.playerController::setBassBoost,
                     onSetLoudness = vm.playerController::setLoudnessGain,
-                    onOpenSettings = { settingsOpen = true },
+                    onOpenSettings = {
+                        vm.refreshCacheSize()
+                        settingsOpen = true
+                    },
                 )
             }
 
-            // Top-Right Settings Overlay (with Appearance & Studio as a clean submenu!)
+            // Top-Right Settings Overlay
             AnimatedVisibility(
                 visible = settingsOpen,
                 enter = fadeIn(tween(240, easing = FastOutSlowInEasing)) +
@@ -450,17 +528,29 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     spotifySyncing = spotifySyncing,
                     serverNotice = serverNotice,
                     updateInfo = updateInfo,
+                    audioCacheBytes = audioCacheBytes,
+                    blockedArtists = blockedArtists,
                     onClose = { settingsOpen = false },
                     onUpdateDesign = vm::updateDesign,
                     onApplyPreset = vm::applyPreset,
+                    onSelectAppIcon = vm::selectAppIcon,
                     onSetSpeed = vm.playerController::setPlaybackSpeed,
                     onSetPitch = vm.playerController::setPlaybackPitch,
                     onSetSkipSilence = vm.playerController::setSkipSilence,
+                    onSetAudio8dEnabled = vm.playerController::setAudio8dEnabled,
+                    onSetAudio8dSpeed = vm.playerController::setAudio8dSpeed,
+                    onSetReverbMode = vm.playerController::setReverbMode,
+                    onApplyAutoEq = vm.playerController::applyAutoEqProfile,
                     onSetEqEnabled = vm.playerController::setEqEnabled,
                     onApplyEqPreset = vm.playerController::applyEqPreset,
                     onSetEqBand = vm.playerController::setEqBand,
                     onSetBassBoost = vm.playerController::setBassBoost,
                     onSetLoudness = vm.playerController::setLoudnessGain,
+                    onClearAudioCache = vm::clearAudioCache,
+                    onRefreshCacheSize = vm::refreshCacheSize,
+                    onUnblockArtist = vm::unblockArtist,
+                    onUpdateIntegrations = vm::updateIntegrations,
+                    onLoginLastFm = vm::authenticateLastFm,
                     onUpdateServerConfig = vm::updateServerConfig,
                     onPingServer = vm::pingServer,
                     onOpenYtMusicLogin = { ytMusicLoginOpen = true },
@@ -480,7 +570,23 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 )
             }
 
-            // In-App Spotify Login WebView (captures sp_dc / sp_key cleanly for hybrid algorithm)
+            // Shazam Acoustic Recognition Overlay
+            AnimatedVisibility(
+                visible = shazamState.isOpen,
+                enter = fadeIn(tween(220)) + scaleIn(tween(260), initialScale = 0.94f),
+                exit = fadeOut(tween(180)) + scaleOut(tween(200), targetScale = 0.96f),
+                modifier = Modifier.zIndex(18f),
+            ) {
+                BackHandler { vm.closeShazam() }
+                ShazamRadarOverlay(
+                    state = shazamState,
+                    onStartListening = { triggerShazamListen() },
+                    onPlayMatch = vm::playShazamMatch,
+                    onClose = vm::closeShazam,
+                )
+            }
+
+            // In-App Spotify Login WebView
             AnimatedVisibility(
                 visible = spotifyLoginOpen,
                 enter = fadeIn(tween(220)) + slideInVertically(tween(280)) { it / 3 },
@@ -496,7 +602,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 )
             }
 
-            // In-App YouTube Music Account Login WebView (captures SAPISID for personalized ad-free feeds)
+            // In-App YouTube Music Account Login WebView
             AnimatedVisibility(
                 visible = ytMusicLoginOpen,
                 enter = fadeIn(tween(220)) + slideInVertically(tween(280)) { it / 3 },
@@ -513,7 +619,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
             }
         }
 
-        // Quick Track Action Menu (⋮)
+        // Quick Track Action Menu (⋮) — now includes Block Artist!
         val menuTrack = trackForMenu
         if (menuTrack != null) {
             AlertDialog(
@@ -540,6 +646,13 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                         TrackActionItem(Icons.Rounded.PlaylistAdd, strings.addToPlaylist) {
                             trackForMenu = null
                             trackForPlaylistDialog = menuTrack
+                        }
+                        TrackActionItem(
+                            Icons.Rounded.Block,
+                            if (strings.isSpanish) "Bloquear artista (${menuTrack.artist})" else "Block artist (${menuTrack.artist})",
+                        ) {
+                            vm.blockArtist(menuTrack.artist)
+                            trackForMenu = null
                         }
                     }
                 },

@@ -45,12 +45,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Link
@@ -60,8 +64,10 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -95,7 +101,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.croix.player.prime.BuildConfig
+import com.croix.player.prime.data.AppIconManager
 import com.croix.player.prime.data.AppUpdateInfo
+import com.croix.player.prime.data.BlockedArtistEntity
 import com.croix.player.prime.data.ServerSessionState
 import com.croix.prime.design.CroixAnimatedBackdrop
 import com.croix.prime.design.CroixDesignState
@@ -116,23 +124,29 @@ import com.croix.prime.design.PrimePresets
 import com.croix.prime.design.PrimeProgressStyle
 import com.croix.prime.design.PrimeTransitionStyle
 import com.croix.prime.design.PrimeVisualizerStyle
+import com.croix.prime.engine.ExternalIntegrationsConfig
 import com.croix.prime.engine.ServerConnectionConfig
 import com.croix.prime.engine.ServerHealthStatus
 import com.croix.prime.engine.ServerPresets
 import com.croix.prime.engine.SpotifyPlaylistSummary
 import com.croix.prime.engine.YtMusicServerMode
+import com.croix.prime.playback.AutoEqHeadphoneProfile
 import com.croix.prime.playback.EqPreset
 import com.croix.prime.playback.PlaybackUiState
+import com.croix.prime.playback.ReverbPresetMode
 import kotlin.math.roundToInt
 
 private enum class SettingsPage {
     HOME,
     SERVERS,
     SPOTIFY,
+    INTEGRATIONS,
+    PRIVACY_BLOCKED,
     STUDIO,
     LYRICS_UI,
     AUDIO_ENGINE,
     EQUALIZER,
+    CACHE_STORAGE,
     GESTURES,
     SPONSORBLOCK,
     UPDATES,
@@ -158,17 +172,29 @@ fun SettingsAndStudioOverlay(
     spotifySyncing: Boolean,
     serverNotice: String?,
     updateInfo: AppUpdateInfo,
+    audioCacheBytes: Long,
+    blockedArtists: List<BlockedArtistEntity>,
     onClose: () -> Unit,
     onUpdateDesign: ((CroixDesignState) -> CroixDesignState) -> Unit,
     onApplyPreset: (CroixDesignState) -> Unit,
+    onSelectAppIcon: (String) -> Unit,
     onSetSpeed: (Float) -> Unit,
     onSetPitch: (Float) -> Unit,
     onSetSkipSilence: (Boolean) -> Unit,
+    onSetAudio8dEnabled: (Boolean) -> Unit,
+    onSetAudio8dSpeed: (Float) -> Unit,
+    onSetReverbMode: (ReverbPresetMode) -> Unit,
+    onApplyAutoEq: (AutoEqHeadphoneProfile) -> Unit,
     onSetEqEnabled: (Boolean) -> Unit,
     onApplyEqPreset: (EqPreset) -> Unit,
     onSetEqBand: (Int, Float) -> Unit,
     onSetBassBoost: (Float) -> Unit,
     onSetLoudness: (Int) -> Unit,
+    onClearAudioCache: () -> Unit,
+    onRefreshCacheSize: () -> Unit,
+    onUnblockArtist: (String) -> Unit,
+    onUpdateIntegrations: ((ExternalIntegrationsConfig) -> ExternalIntegrationsConfig) -> Unit,
+    onLoginLastFm: (String, String, String, String) -> Unit,
     onUpdateServerConfig: ((ServerConnectionConfig) -> ServerConnectionConfig) -> Unit,
     onPingServer: () -> Unit,
     onOpenYtMusicLogin: () -> Unit,
@@ -251,10 +277,13 @@ fun SettingsAndStudioOverlay(
                         SettingsPage.HOME -> if (es) "Configuración" else "Settings"
                         SettingsPage.SERVERS -> if (es) "Servidores y Ad-Block" else "Servers & Ad-Block"
                         SettingsPage.SPOTIFY -> if (es) "Algoritmo Spotify" else "Spotify Algorithm"
+                        SettingsPage.INTEGRATIONS -> if (es) "Discord y Scrobbling" else "Discord & Scrobbling"
+                        SettingsPage.PRIVACY_BLOCKED -> if (es) "Privacidad y Bloqueos" else "Privacy & Blocked"
                         SettingsPage.STUDIO -> if (es) "Estudio de Apariencia" else "Appearance Studio"
                         SettingsPage.LYRICS_UI -> if (es) "Letras y Visualizador" else "Lyrics & Visualizer"
                         SettingsPage.AUDIO_ENGINE -> if (es) "Reproductor y Audio" else "Player & Audio"
-                        SettingsPage.EQUALIZER -> if (es) "Ecualizador y Efectos" else "Equalizer & FX"
+                        SettingsPage.EQUALIZER -> if (es) "Audio 8D, Reverb y AutoEq" else "8D Audio, Reverb & AutoEq"
+                        SettingsPage.CACHE_STORAGE -> if (es) "Caché Inteligente de Audio" else "Smart Audio Cache"
                         SettingsPage.GESTURES -> if (es) "Gestos y Hardware" else "Gestures & Hardware"
                         SettingsPage.SPONSORBLOCK -> "SponsorBlock"
                         SettingsPage.UPDATES -> if (es) "Actualizaciones" else "Updates"
@@ -371,6 +400,33 @@ fun SettingsAndStudioOverlay(
                                             badge = if (serverState.isSpotifyConnected) "Activo" else null,
                                             onClick = { page = SettingsPage.SPOTIFY },
                                         ),
+                                        SegmentedEntry(
+                                            icon = Icons.Rounded.Hub,
+                                            title = if (es) "Discord RPC, Last.fm y ListenBrainz" else "Discord RPC, Last.fm & ListenBrainz",
+                                            subtitle = buildString {
+                                                val active = buildList {
+                                                    if (serverState.integrations.isDiscordReady) add("Discord")
+                                                    if (serverState.integrations.isLastFmReady) add("Last.fm")
+                                                    if (serverState.integrations.isListenBrainzReady) add("ListenBrainz")
+                                                }
+                                                append(if (active.isEmpty()) (if (es) "Muestra lo que escuchas y sincroniza scrobbles" else "Show Rich Presence & sync scrobbles") else active.joinToString(" • "))
+                                            },
+                                            accent = Color(0xFF5865F2),
+                                            badge = if (serverState.integrations.isDiscordReady || serverState.integrations.isLastFmReady || serverState.integrations.isListenBrainzReady) "On" else null,
+                                            onClick = { page = SettingsPage.INTEGRATIONS },
+                                        ),
+                                        SegmentedEntry(
+                                            icon = Icons.Rounded.VisibilityOff,
+                                            title = if (es) "Sesión Privada y Artistas Bloqueados" else "Private Session & Blocked Artists",
+                                            subtitle = if (design.privateSessionEnabled) {
+                                                if (es) "Incógnito ACTIVO • ${blockedArtists.size} artistas bloqueados" else "Incognito ON • ${blockedArtists.size} blocked artists"
+                                            } else {
+                                                if (es) "Pausa historial/scrobbling • ${blockedArtists.size} bloqueados" else "Pause history/scrobbling • ${blockedArtists.size} blocked"
+                                            },
+                                            accent = Color(0xFFCE93D8),
+                                            badge = if (design.privateSessionEnabled) "Incógnito" else null,
+                                            onClick = { page = SettingsPage.PRIVACY_BLOCKED },
+                                        ),
                                     ),
                                 )
                             }
@@ -413,14 +469,30 @@ fun SettingsAndStudioOverlay(
                                         ),
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Equalizer,
-                                            title = if (es) "Ecualizador y Efectos" else "Equalizer & Effects",
-                                            subtitle = if (playback.eqEnabled) {
-                                                "${playback.eqPreset.label} • Graves ${(playback.bassBoostLevel * 100).roundToInt()}%"
-                                            } else {
-                                                if (es) "Ecualizador de 5 bandas, refuerzo de graves y ganancia" else "5-band EQ, Bass Boost & Loudness"
+                                            title = if (es) "Audio 8D, Reverb, AutoEq y Salida" else "8D Audio, Reverb, AutoEq & Output",
+                                            subtitle = buildString {
+                                                append(if (playback.audio8dEnabled) "8D Activo" else "8D Off")
+                                                append(" • ${playback.reverbMode.label}")
+                                                append(" • ${playback.activeOutput.route.labelEs}")
                                             },
                                             accent = palette.secondary,
+                                            badge = if (playback.audio8dEnabled) "8D" else null,
                                             onClick = { page = SettingsPage.EQUALIZER },
+                                        ),
+                                        SegmentedEntry(
+                                            icon = Icons.Rounded.Storage,
+                                            title = if (es) "Caché Inteligente de Audio" else "Smart Audio Cache",
+                                            subtitle = if (design.audioCacheLimitMb == 0) {
+                                                if (es) "Desactivada • Streaming puro" else "Off • Pure streaming"
+                                            } else {
+                                                "${"%.1f".format(audioCacheBytes / (1024f * 1024f))} MB usados de ${design.audioCacheLimitMb} MB"
+                                            },
+                                            accent = Color(0xFFFFB300),
+                                            badge = if (design.audioCacheLimitMb > 0) "${design.audioCacheLimitMb}MB" else "Off",
+                                            onClick = {
+                                                onRefreshCacheSize()
+                                                page = SettingsPage.CACHE_STORAGE
+                                            },
                                         ),
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Shield,
@@ -943,8 +1015,45 @@ fun SettingsAndStudioOverlay(
                                                 StudioSwitch(if (es) "Efecto Vinilo Giratorio" else "Vinyl Spin Artwork", design.vinylSpinEnabled) { v ->
                                                     onUpdateDesign { it.copy(vinylSpinEnabled = v) }
                                                 }
+                                                StudioSwitch(if (es) "Fondo Canvas Animado en Reproductor" else "Animated Canvas Backdrop", design.canvasMotionEnabled) { v ->
+                                                    onUpdateDesign { it.copy(canvasMotionEnabled = v) }
+                                                }
+                                                StudioSwitch(if (es) "Carátula 3D Parallax (Giroscopio)" else "3D Gyroscope Artwork Parallax", design.artworkParallax3d) { v ->
+                                                    onUpdateDesign { it.copy(artworkParallax3d = v) }
+                                                }
                                                 StudioSlider(if (es) "Opacidad del Panel de Controles" else "Control Dock Opacity", design.playerControlDockOpacity, 0.05f..0.80f, "${(design.playerControlDockOpacity * 100).roundToInt()}%") { v ->
                                                     onUpdateDesign { it.copy(playerControlDockOpacity = v) }
+                                                }
+                                                Text(if (es) "Ícono de la Aplicación (Launcher)" else "App Launcher Icon", color = palette.primary, fontWeight = FontWeight.Bold)
+                                                Row(
+                                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                ) {
+                                                    AppIconManager.options.forEach { opt ->
+                                                        val selected = design.appIconId == opt.id
+                                                        CroixGlassCard(
+                                                            cornerRadius = 16.dp,
+                                                            accentTint = if (selected) Color(opt.primaryHex) else null,
+                                                            onClick = { onSelectAppIcon(opt.id) },
+                                                        ) {
+                                                            Column(
+                                                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                            ) {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .size(38.dp)
+                                                                        .clip(CircleShape)
+                                                                        .background(Brush.linearGradient(listOf(Color(opt.primaryHex), Color(opt.secondaryHex)))),
+                                                                    contentAlignment = Alignment.Center,
+                                                                ) {
+                                                                    Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                                                }
+                                                                Text(if (es) opt.labelEs else opt.labelEn, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                             4 -> {
@@ -1027,6 +1136,18 @@ fun SettingsAndStudioOverlay(
                                         StudioSlider(if (es) "Desenfoque de Fondo en Letras" else "Lyrics Backdrop Blur", design.lyricsBackdropBlurDp, 0f..34f, "${design.lyricsBackdropBlurDp.roundToInt()} dp") { v ->
                                             onUpdateDesign { it.copy(lyricsBackdropBlurDp = v) }
                                         }
+                                        StudioSlider(
+                                            label = if (es) "Ajuste de Sincronización Global" else "Global Sync Offset",
+                                            value = design.lyricsOffsetMs.toFloat(),
+                                            range = -3000f..3000f,
+                                            valueLabel = "${"%.1f".format(design.lyricsOffsetMs / 1000f)}s",
+                                        ) { v -> onUpdateDesign { it.copy(lyricsOffsetMs = (v / 100f).roundToInt() * 100L) } }
+                                        StudioSwitch(if (es) "Traducir letras al Español automáticamente" else "Auto-translate lyrics to Spanish", design.lyricsAutoTranslateEs) { v ->
+                                            onUpdateDesign { it.copy(lyricsAutoTranslateEs = v) }
+                                        }
+                                        StudioSwitch(if (es) "Romanizar Coreano/Japonés/Ruso automáticamente" else "Auto-romanize non-Latin scripts", design.lyricsAutoRomanize) { v ->
+                                            onUpdateDesign { it.copy(lyricsAutoRomanize = v) }
+                                        }
                                         StudioEnumRow(if (es) "Visualizador de Audio en Vivo" else "Live Visualizer", PrimeVisualizerStyle.entries, design.visualizerStyle, { it.label }) { v ->
                                             onUpdateDesign { it.copy(visualizerStyle = v) }
                                         }
@@ -1073,9 +1194,54 @@ fun SettingsAndStudioOverlay(
                         }
 
                         // =========================================================
-                        // SUBMENU: 5-BAND EQUALIZER & FX
+                        // SUBMENU: 8D SPATIAL, REVERB, AUTOEQ, OUTPUT PROFILES & 5-BAND EQ
                         // =========================================================
                         SettingsPage.EQUALIZER -> {
+                            item {
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text(if (es) "Audio Espacial 8D y Reverb" else "8D Spatial Audio & Reverb", color = palette.primary, fontWeight = FontWeight.Bold)
+                                        StudioSwitch(if (es) "Activar Audio Espacial 8D (Estéreo Orbital)" else "Enable 8D Spatial Audio", playback.audio8dEnabled, onSetAudio8dEnabled)
+                                        if (playback.audio8dEnabled) {
+                                            StudioSlider(if (es) "Velocidad de Órbita 8D" else "8D Orbit Speed", playback.audio8dSpeed, 0.1f..1.0f, "${(playback.audio8dSpeed * 100).roundToInt()}%", onSetAudio8dSpeed)
+                                        }
+                                        StudioEnumRow(if (es) "Reverb / Sala Acústica" else "Reverb Room", ReverbPresetMode.entries, playback.reverbMode, { it.label }, onSetReverbMode)
+                                        StudioEnumRow(if (es) "AutoEq para Audífonos" else "AutoEq Headphone Profile", AutoEqHeadphoneProfile.entries, playback.autoEqProfile, { it.label }, onApplyAutoEq)
+                                    }
+                                }
+                            }
+                            item {
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Rounded.Headphones, null, tint = palette.secondary, modifier = Modifier.size(18.dp))
+                                            Text(if (es) "Perfiles Automáticos según Salida" else "Auto Profiles by Output Route", color = palette.secondary, fontWeight = FontWeight.Bold)
+                                        }
+                                        Text(
+                                            if (es) "Salida actual: ${playback.activeOutput.route.labelEs} (${playback.activeOutput.deviceName})" else "Current: ${playback.activeOutput.deviceName}",
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        StudioSwitch(if (es) "Cambiar AutoEq automáticamente al conectar audífonos" else "Auto-switch AutoEq on output change", design.autoOutputProfilesEnabled) { v ->
+                                            onUpdateDesign { it.copy(autoOutputProfilesEnabled = v) }
+                                        }
+                                        if (design.autoOutputProfilesEnabled) {
+                                            val btSel = AutoEqHeadphoneProfile.entries.firstOrNull { it.name == design.bluetoothAutoEqPreset } ?: AutoEqHeadphoneProfile.SONY_XM
+                                            val wiredSel = AutoEqHeadphoneProfile.entries.firstOrNull { it.name == design.wiredAutoEqPreset } ?: AutoEqHeadphoneProfile.STUDIO_IEM
+                                            val spkSel = AutoEqHeadphoneProfile.entries.firstOrNull { it.name == design.speakerAutoEqPreset } ?: AutoEqHeadphoneProfile.FLAT
+                                            StudioEnumRow("Bluetooth", AutoEqHeadphoneProfile.entries, btSel, { it.label }) { p ->
+                                                onUpdateDesign { it.copy(bluetoothAutoEqPreset = p.name) }
+                                            }
+                                            StudioEnumRow(if (es) "Audífonos Cable / USB" else "Wired / USB", AutoEqHeadphoneProfile.entries, wiredSel, { it.label }) { p ->
+                                                onUpdateDesign { it.copy(wiredAutoEqPreset = p.name) }
+                                            }
+                                            StudioEnumRow(if (es) "Altavoz del teléfono" else "Phone Speaker", AutoEqHeadphoneProfile.entries, spkSel, { it.label }) { p ->
+                                                onUpdateDesign { it.copy(speakerAutoEqPreset = p.name) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             item {
                                 CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
                                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1091,6 +1257,201 @@ fun SettingsAndStudioOverlay(
                                         StudioSlider(if (es) "Refuerzo de Graves (Bass Boost)" else "Bass Boost", playback.bassBoostLevel, 0f..1f, "${(playback.bassBoostLevel * 100).roundToInt()}%", onSetBassBoost)
                                         StudioSlider(if (es) "Ganancia de Volumen" else "Loudness Gain", playback.loudnessGainMb.toFloat(), 0f..1200f, "+${playback.loudnessGainMb / 100} dB") { v ->
                                             onSetLoudness(v.roundToInt())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================
+                        // SUBMENU: SMART AUDIO CACHE ([4])
+                        // =========================================================
+                        SettingsPage.CACHE_STORAGE -> {
+                            if (serverNotice != null) {
+                                item {
+                                    CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFF00E676)) {
+                                        Text(serverNotice, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(14.dp))
+                                    }
+                                }
+                            }
+                            item {
+                                val usedMb = audioCacheBytes / (1024f * 1024f)
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFFFB300)) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text(if (es) "Caché Inteligente LRU de Audio" else "Smart Audio LRU Cache", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            if (es) "Guarda automáticamente las canciones que escuchas para reproducirlas al instante y ahorrar datos móviles." else "Automatically caches streamed tracks for instant replay and lower mobile data use.",
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        Text(
+                                            text = if (design.audioCacheLimitMb == 0) {
+                                                "Caché desactivada (${"%.1f".format(usedMb)} MB actuales)"
+                                            } else {
+                                                "${"%.1f".format(usedMb)} MB usados de ${design.audioCacheLimitMb} MB"
+                                            },
+                                            color = Color(0xFFFFD54F),
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Text(if (es) "Límite máximo de caché" else "Maximum cache size", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            listOf(0 to "Off", 256 to "256 MB", 512 to "512 MB", 1024 to "1 GB", 2048 to "2 GB").forEach { (mb, lbl) ->
+                                                CroixGlassCard(
+                                                    cornerRadius = 12.dp,
+                                                    accentTint = if (design.audioCacheLimitMb == mb) palette.primary else null,
+                                                    onClick = { onUpdateDesign { it.copy(audioCacheLimitMb = mb) } },
+                                                ) {
+                                                    Text(lbl, color = Color.White, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+                                                }
+                                            }
+                                        }
+                                        Button(
+                                            onClick = onClearAudioCache,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Icon(Icons.Rounded.DeleteSweep, null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(if (es) "Vaciar Caché de Audio" else "Clear Audio Cache")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================
+                        // SUBMENU: DISCORD RICH PRESENCE + LAST.FM + LISTENBRAINZ ([7])
+                        // =========================================================
+                        SettingsPage.INTEGRATIONS -> {
+                            val integ = serverState.integrations
+                            if (serverNotice != null) {
+                                item {
+                                    CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFF5865F2)) {
+                                        Text(serverNotice, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(14.dp))
+                                    }
+                                }
+                            }
+                            item {
+                                var discordTokenDraft by remember(integ.discordToken) { mutableStateOf(integ.discordToken) }
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFF5865F2)) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Text("Discord Rich Presence", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            if (es) "Muestra «Escuchando Croix Player Prime» en tiempo real en tu perfil de Discord (se pausa en Sesión Privada)." else "Broadcasts live Listening status to your Discord profile.",
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        StudioSwitch(if (es) "Activar Discord Rich Presence" else "Enable Discord RPC", integ.discordEnabled) { en ->
+                                            onUpdateIntegrations { it.copy(discordEnabled = en) }
+                                        }
+                                        OutlinedTextField(
+                                            value = discordTokenDraft,
+                                            onValueChange = { discordTokenDraft = it },
+                                            label = { Text("Token de usuario de Discord") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                        Button(
+                                            onClick = {
+                                                onUpdateIntegrations { it.copy(discordToken = discordTokenDraft.trim(), discordEnabled = discordTokenDraft.isNotBlank()) }
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) { Text(if (es) "Guardar Token Discord" else "Save Discord Token") }
+                                    }
+                                }
+                            }
+                            item {
+                                var lfmKey by remember(integ.lastFmApiKey) { mutableStateOf(integ.lastFmApiKey) }
+                                var lfmSecret by remember(integ.lastFmApiSecret) { mutableStateOf(integ.lastFmApiSecret) }
+                                var lfmUser by remember(integ.lastFmUsername) { mutableStateOf(integ.lastFmUsername) }
+                                var lfmPass by remember { mutableStateOf("") }
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFD51007)) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Text("Last.fm Scrobbling", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        if (integ.isLastFmReady) {
+                                            Text("✓ Conectado como ${integ.lastFmUsername}", color = Color(0xFF00E676), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                        }
+                                        StudioSwitch(if (es) "Activar Scrobbling en Last.fm" else "Enable Last.fm", integ.lastFmEnabled) { en ->
+                                            onUpdateIntegrations { it.copy(lastFmEnabled = en) }
+                                        }
+                                        OutlinedTextField(value = lfmKey, onValueChange = { lfmKey = it }, label = { Text("Last.fm API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                        OutlinedTextField(value = lfmSecret, onValueChange = { lfmSecret = it }, label = { Text("Last.fm API Secret") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                        OutlinedTextField(value = lfmUser, onValueChange = { lfmUser = it }, label = { Text("Usuario Last.fm") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                        OutlinedTextField(value = lfmPass, onValueChange = { lfmPass = it }, label = { Text("Contraseña Last.fm") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                        Button(
+                                            enabled = lfmKey.isNotBlank() && lfmSecret.isNotBlank() && lfmUser.isNotBlank() && lfmPass.isNotBlank(),
+                                            onClick = { onLoginLastFm(lfmKey, lfmSecret, lfmUser, lfmPass) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) { Text(if (es) "Iniciar sesión en Last.fm" else "Sign in to Last.fm") }
+                                    }
+                                }
+                            }
+                            item {
+                                var lbToken by remember(integ.listenBrainzToken) { mutableStateOf(integ.listenBrainzToken) }
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFEB743B)) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Text("ListenBrainz Scrobbling", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        StudioSwitch(if (es) "Activar ListenBrainz" else "Enable ListenBrainz", integ.listenBrainzEnabled) { en ->
+                                            onUpdateIntegrations { it.copy(listenBrainzEnabled = en) }
+                                        }
+                                        OutlinedTextField(value = lbToken, onValueChange = { lbToken = it }, label = { Text("Token de usuario ListenBrainz") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                        Button(
+                                            onClick = {
+                                                onUpdateIntegrations { it.copy(listenBrainzToken = lbToken.trim(), listenBrainzEnabled = lbToken.isNotBlank()) }
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) { Text(if (es) "Guardar Token ListenBrainz" else "Save ListenBrainz Token") }
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================
+                        // SUBMENU: PRIVATE SESSION (INCOGNITO) & BLOCKED ARTISTS ([Y], [H])
+                        // =========================================================
+                        SettingsPage.PRIVACY_BLOCKED -> {
+                            item {
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFCE93D8)) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Text(if (es) "Modo Sesión Privada (Incógnito)" else "Private Session (Incognito)", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            if (es) "Cuando está activo, nada de lo que escuches se guarda en tu historial, estadísticas, algoritmo ni se envía a Discord / Last.fm / ListenBrainz." else "Pauses history, stats, algorithm updates, Discord RPC & scrobbling.",
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        StudioSwitch(if (es) "Activar Sesión Privada" else "Enable Private Session", design.privateSessionEnabled) { en ->
+                                            onUpdateDesign { it.copy(privateSessionEnabled = en) }
+                                        }
+                                    }
+                                }
+                            }
+                            item {
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Rounded.Block, null, tint = Color(0xFFFF5252), modifier = Modifier.size(18.dp))
+                                            Text(if (es) "Artistas Bloqueados (${blockedArtists.size})" else "Blocked Artists (${blockedArtists.size})", color = Color.White, fontWeight = FontWeight.Bold)
+                                        }
+                                        if (blockedArtists.isEmpty()) {
+                                            Text(
+                                                if (es) "No tienes artistas bloqueados. Puedes bloquear un artista desde el menú ⋮ de cualquier canción o desde su perfil." else "No blocked artists yet.",
+                                                color = palette.textSecondary,
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        } else {
+                                            blockedArtists.forEach { b ->
+                                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 12.dp) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                    ) {
+                                                        Text(b.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                                        TextButton(onClick = { onUnblockArtist(b.artistKey) }) {
+                                                            Text(if (es) "Desbloquear" else "Unblock")
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

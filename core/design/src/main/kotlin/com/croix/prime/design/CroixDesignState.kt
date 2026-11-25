@@ -151,6 +151,9 @@ data class CroixDesignState(
     val lyricsFontSizeSp: Float = 24f,
     val lyricsAlign: PrimeLyricsAlign = PrimeLyricsAlign.START,
     val lyricsBackdropBlurDp: Float = 26f,
+    val lyricsOffsetMs: Long = 0L,
+    val lyricsAutoRomanize: Boolean = false,
+    val lyricsAutoTranslateEs: Boolean = false,
     // SponsorBlock
     val sponsorBlockEnabled: Boolean = true,
     val skipMusicOfftopic: Boolean = true,
@@ -161,6 +164,16 @@ data class CroixDesignState(
     val transitionSpeed: Float = 1.0f,
     val crossfadeSeconds: Int = 0,
     val languageMode: PrimeLanguageMode = PrimeLanguageMode.SPANISH,
+    // v4.0 Prime Pro Features (Cache, Canvas, 3D Parallax, Private Mode, App Icon, Output Profiles)
+    val audioCacheLimitMb: Int = 512,
+    val canvasMotionEnabled: Boolean = true,
+    val artworkParallax3d: Boolean = true,
+    val privateSessionEnabled: Boolean = false,
+    val appIconId: String = "violet",
+    val autoOutputProfilesEnabled: Boolean = true,
+    val bluetoothAutoEqPreset: String = "SONY_XM",
+    val wiredAutoEqPreset: String = "STUDIO_IEM",
+    val speakerAutoEqPreset: String = "FLAT",
 ) {
     fun clamped(): CroixDesignState = copy(
         glassOpacity = glassOpacity.coerceIn(0.05f, 0.75f),
@@ -182,8 +195,10 @@ data class CroixDesignState(
         miniPlayerHeightDp = miniPlayerHeightDp.coerceIn(56f, 84f),
         lyricsFontSizeSp = lyricsFontSizeSp.coerceIn(16f, 36f),
         lyricsBackdropBlurDp = lyricsBackdropBlurDp.coerceIn(0f, 34f),
+        lyricsOffsetMs = lyricsOffsetMs.coerceIn(-5_000L, 5_000L),
         transitionSpeed = transitionSpeed.coerceIn(0.5f, 2.0f),
         crossfadeSeconds = crossfadeSeconds.coerceIn(0, 10),
+        audioCacheLimitMb = audioCacheLimitMb.coerceIn(0, 4096),
     )
 
     val customPrimaryFromHue: Color

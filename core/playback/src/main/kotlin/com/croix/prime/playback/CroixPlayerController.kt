@@ -9,6 +9,7 @@ import android.content.Context
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
+import android.media.audiofx.PresetReverb
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
@@ -51,10 +52,42 @@ enum class EqPreset(val label: String, val bandsDb: List<Float>) {
     CUSTOM("Personalizado", listOf(0f, 0f, 0f, 0f, 0f)),
 }
 
+/**
+ * Curated 5-band AutoEq target compensation profiles for popular headphones & IEMs.
+ */
+enum class AutoEqHeadphoneProfile(val label: String, val bandsDb: List<Float>) {
+    FLAT("Sin AutoEq (Plano)", listOf(0f, 0f, 0f, 0f, 0f)),
+    AIRPODS_PRO("AirPods Pro", listOf(3.0f, 1.0f, -1.0f, 2.5f, 3.5f)),
+    SONY_XM("Sony WH/WF-1000XM", listOf(-3.5f, -2.5f, 1.5f, 3.5f, 2.5f)),
+    GALAXY_BUDS("Galaxy Buds Pro", listOf(1.5f, -1.0f, 0.5f, 2.0f, 2.5f)),
+    JBL_BASS("JBL Tune / Live", listOf(-2.0f, -1.5f, 2.0f, 3.0f, 2.0f)),
+    BOSE_QC("Bose QuietComfort", listOf(2.0f, -1.0f, 1.5f, 2.0f, 3.0f)),
+    STUDIO_IEM("KZ / IEM Estudio", listOf(2.5f, -1.5f, 1.0f, -2.0f, 1.5f)),
+}
+
+enum class ReverbPresetMode(val label: String, val androidPreset: Short) {
+    OFF("Apagado", PresetReverb.PRESET_NONE),
+    SMALL_ROOM("Sala Pequeña", PresetReverb.PRESET_SMALLROOM),
+    MEDIUM_ROOM("Habitación", PresetReverb.PRESET_MEDIUMROOM),
+    LARGE_HALL("Concierto", PresetReverb.PRESET_LARGEHALL),
+    PLATE("Estudio Plate", PresetReverb.PRESET_PLATE),
+}
+
+data class AudioTechnicalSpecs(
+    val codec: String = "—",
+    val mimeType: String = "—",
+    val bitrateKbps: Int = 0,
+    val loudnessDb: Float? = null,
+    val clientKey: String = "—",
+    val sourceOrigin: String = "Streaming Directo",
+    val isCachedOnDisk: Boolean = false,
+)
+
 data class PlaybackUiState(
     val currentTrack: Track? = null,
     val isPlayingOfflineFile: Boolean = false,
     val activeStreamInfo: String = "",
+    val techSpecs: AudioTechnicalSpecs = AudioTechnicalSpecs(),
     val queue: List<Track> = emptyList(),
     val currentIndex: Int = -1,
     val isPlaying: Boolean = false,
@@ -71,8 +104,13 @@ data class PlaybackUiState(
     val eqEnabled: Boolean = false,
     val eqPreset: EqPreset = EqPreset.FLAT,
     val eqBandsDb: List<Float> = listOf(0f, 0f, 0f, 0f, 0f),
+    val autoEqProfile: AutoEqHeadphoneProfile = AutoEqHeadphoneProfile.FLAT,
     val bassBoostLevel: Float = 0f,
     val loudnessGainMb: Int = 0,
+    val audio8dEnabled: Boolean = false,
+    val audio8dSpeed: Float = 0.45f,
+    val reverbMode: ReverbPresetMode = ReverbPresetMode.OFF,
+    val activeOutput: ActiveAudioOutput = ActiveAudioOutput(),
     val errorMessage: String? = null,
 )
 
@@ -85,11 +123,13 @@ class CroixPlayerController(
     private val crossfadeSecondsProvider: () -> Int = { 0 },
     private val normalizeAudioProvider: () -> Boolean = { true },
     private val autoPlayRelatedProvider: () -> Boolean = { true },
+    private val autoOutputProfileResolver: (AudioOutputRoute) -> AutoEqHeadphoneProfile? = { null },
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val outputMonitor = AudioOutputMonitor(appContext)
 
-    private val _state = MutableStateFlow(PlaybackUiState())
+    private val _state = MutableStateFlow(PlaybackUiState(activeOutput = outputMonitor.activeOutput.value))
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
 
     // Separated high-frequency playback position so root screens NEVER recompose every 350ms!
@@ -106,6 +146,7 @@ class CroixPlayerController(
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
     private var loudness: LoudnessEnhancer? = null
+    private var presetReverb: PresetReverb? = null
     private val skippedUuids = mutableSetOf<String>()
 
     init {
@@ -125,6 +166,20 @@ class CroixPlayerController(
             },
             ContextCompat.getMainExecutor(appContext),
         )
+
+        // Observe Bluetooth / Wired / Speaker output switches and auto-apply matching AutoEq profile
+        scope.launch {
+            var lastRoute: AudioOutputRoute? = null
+            outputMonitor.activeOutput.collect { out ->
+                _state.update { it.copy(activeOutput = out) }
+                if (lastRoute != out.route) {
+                    lastRoute = out.route
+                    autoOutputProfileResolver(out.route)?.let { profile ->
+                        applyAutoEqProfile(profile)
+                    }
+                }
+            }
+        }
     }
 
     private val playerListener = object : Player.Listener {
@@ -201,7 +256,7 @@ class CroixPlayerController(
                             skippedUuids += hit.uuid
                             mc.seekTo(hit.endMs)
                             _positionMs.value = hit.endMs
-                            _state.update { it.copy(lastSkippedNotice = "SponsorBlock skipped ${hit.category.replace('_', ' ')}") }
+                            _state.update { it.copy(lastSkippedNotice = "SponsorBlock saltó ${hit.category.replace('_', ' ')}") }
                             scope.launch {
                                 delay(3_000L)
                                 _state.update { it.copy(lastSkippedNotice = null) }
@@ -292,6 +347,59 @@ class CroixPlayerController(
         _state.update { it.copy(queue = list, currentIndex = adjustedIdx) }
     }
 
+    /**
+     * Queue Pro: Reorders any item up or down cleanly while keeping currentIndex pinned to the playing track.
+     */
+    fun moveQueueItem(fromIndex: Int, toIndex: Int) {
+        val cur = _state.value
+        if (fromIndex !in cur.queue.indices || toIndex !in cur.queue.indices || fromIndex == toIndex) return
+        val list = cur.queue.toMutableList()
+        val item = list.removeAt(fromIndex)
+        list.add(toIndex, item)
+        val newCurrent = when {
+            cur.currentIndex == fromIndex -> toIndex
+            fromIndex < cur.currentIndex && toIndex >= cur.currentIndex -> cur.currentIndex - 1
+            fromIndex > cur.currentIndex && toIndex <= cur.currentIndex -> cur.currentIndex + 1
+            else -> cur.currentIndex
+        }
+        _state.update { it.copy(queue = list, currentIndex = newCurrent) }
+    }
+
+    /**
+     * Queue Pro: Removes duplicate track IDs from the queue while preserving the currently playing song.
+     */
+    fun deduplicateQueue(): Int {
+        val cur = _state.value
+        if (cur.queue.size <= 1) return 0
+        val currentId = cur.currentTrack?.id
+        val seen = HashSet<String>()
+        val deduped = mutableListOf<Track>()
+        var newCurrentIdx = 0
+        cur.queue.forEachIndexed { idx, t ->
+            if (idx == cur.currentIndex) {
+                if (t.id !in seen) {
+                    seen.add(t.id)
+                    newCurrentIdx = deduped.size
+                    deduped.add(t)
+                } else {
+                    // Replace earlier duplicate with the currently playing position
+                    val oldIdx = deduped.indexOfFirst { it.id == t.id }
+                    if (oldIdx >= 0) newCurrentIdx = oldIdx
+                }
+            } else if (seen.add(t.id)) {
+                deduped.add(t)
+            }
+        }
+        val removed = cur.queue.size - deduped.size
+        if (removed > 0) {
+            val safeIdx = if (currentId != null) {
+                deduped.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+            } else newCurrentIdx.coerceIn(0, deduped.lastIndex)
+            _state.update { it.copy(queue = deduped, currentIndex = safeIdx) }
+        }
+        return removed
+    }
+
     fun playAtIndex(index: Int) {
         val list = _state.value.queue
         if (index !in list.indices) return
@@ -334,16 +442,51 @@ class CroixPlayerController(
             }
 
             val offlineFile = localFileProvider(track.id)
+            val isDiskCached = CroixAudioCache.isTrackCached(track.id)
             val resolvedResult: Result<Pair<Uri, ResolvedStream?>> = if (offlineFile != null) {
-                _state.update { it.copy(isPlayingOfflineFile = true, activeStreamInfo = "Offline • M4A") }
                 activeClientKey = "OFFLINE"
+                _state.update {
+                    it.copy(
+                        isPlayingOfflineFile = true,
+                        activeStreamInfo = "Offline • M4A",
+                        techSpecs = AudioTechnicalSpecs(
+                            codec = "AAC/M4A",
+                            mimeType = "audio/mp4 (Archivo Local)",
+                            bitrateKbps = 128,
+                            loudnessDb = null,
+                            clientKey = "OFFLINE_STORAGE",
+                            sourceOrigin = "Descarga Offline",
+                            isCachedOnDisk = true,
+                        ),
+                    )
+                }
                 Result.success(Uri.fromFile(offlineFile) to null)
             } else {
                 _state.update { it.copy(isPlayingOfflineFile = false, activeStreamInfo = "") }
                 innerTube.resolveAudioStream(track.id, bypassCache = bypassCache).map { stream ->
                     activeClientKey = stream.clientKey
-                    val info = "${stream.codecLabel} • ${stream.bitrateKbps} kbps"
-                    _state.update { it.copy(activeStreamInfo = info) }
+                    val cacheTag = if (isDiskCached) " • Caché" else ""
+                    val info = "${stream.codecLabel} • ${stream.bitrateKbps} kbps$cacheTag"
+                    val origin = when {
+                        isDiskCached -> "Caché Inteligente Local"
+                        stream.clientKey == "PIPED_RELAY" -> "Relay Piped Sin Anuncios"
+                        stream.clientKey == "NEWPIPE" -> "Extractor Directo"
+                        else -> "Streaming Directo YT"
+                    }
+                    _state.update {
+                        it.copy(
+                            activeStreamInfo = info,
+                            techSpecs = AudioTechnicalSpecs(
+                                codec = stream.codecLabel,
+                                mimeType = stream.mimeType,
+                                bitrateKbps = stream.bitrateKbps,
+                                loudnessDb = stream.loudnessDb,
+                                clientKey = stream.clientKey,
+                                sourceOrigin = origin,
+                                isCachedOnDisk = isDiskCached,
+                            ),
+                        )
+                    }
                     CroixAudioSessionBridge.registerStreamHeaders(
                         stream.url,
                         StreamRequestHeaders(
@@ -373,6 +516,7 @@ class CroixPlayerController(
                     .build()
                 val mediaItem = MediaItem.Builder()
                     .setMediaId(track.id)
+                    .setCustomCacheKey(track.id)
                     .setUri(mediaUri)
                     .setMediaMetadata(metadata)
                     .build()
@@ -513,6 +657,24 @@ class CroixPlayerController(
         runCatching { CroixAudioSessionBridge.exoPlayerRef?.skipSilenceEnabled = enabled }
     }
 
+    @OptIn(UnstableApi::class)
+    fun setAudio8dEnabled(enabled: Boolean) {
+        CroixAudioSessionBridge.audio8dProcessor.enabled = enabled
+        _state.update { it.copy(audio8dEnabled = enabled) }
+    }
+
+    @OptIn(UnstableApi::class)
+    fun setAudio8dSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.1f, 1.0f)
+        CroixAudioSessionBridge.audio8dProcessor.speed = clamped
+        _state.update { it.copy(audio8dSpeed = clamped) }
+    }
+
+    fun setReverbMode(mode: ReverbPresetMode) {
+        _state.update { it.copy(reverbMode = mode) }
+        applyAudioEffects()
+    }
+
     fun setEqEnabled(enabled: Boolean) {
         _state.update { it.copy(eqEnabled = enabled) }
         applyAudioEffects()
@@ -520,7 +682,24 @@ class CroixPlayerController(
 
     fun applyEqPreset(preset: EqPreset) {
         _state.update {
-            it.copy(eqEnabled = true, eqPreset = preset, eqBandsDb = preset.bandsDb)
+            it.copy(
+                eqEnabled = true,
+                eqPreset = preset,
+                autoEqProfile = AutoEqHeadphoneProfile.FLAT,
+                eqBandsDb = preset.bandsDb,
+            )
+        }
+        applyAudioEffects()
+    }
+
+    fun applyAutoEqProfile(profile: AutoEqHeadphoneProfile) {
+        _state.update {
+            it.copy(
+                eqEnabled = profile != AutoEqHeadphoneProfile.FLAT,
+                autoEqProfile = profile,
+                eqPreset = if (profile == AutoEqHeadphoneProfile.FLAT) EqPreset.FLAT else EqPreset.CUSTOM,
+                eqBandsDb = profile.bandsDb,
+            )
         }
         applyAudioEffects()
     }
@@ -529,7 +708,7 @@ class CroixPlayerController(
         _state.update { cur ->
             val updated = cur.eqBandsDb.toMutableList()
             if (bandIndex in updated.indices) updated[bandIndex] = gainDb.coerceIn(-12f, 12f)
-            cur.copy(eqEnabled = true, eqPreset = EqPreset.CUSTOM, eqBandsDb = updated)
+            cur.copy(eqEnabled = true, eqPreset = EqPreset.CUSTOM, autoEqProfile = AutoEqHeadphoneProfile.FLAT, eqBandsDb = updated)
         }
         applyAudioEffects()
     }
@@ -577,6 +756,13 @@ class CroixPlayerController(
                 setTargetGain(s.loudnessGainMb)
             }
         }
+        runCatching {
+            if (presetReverb == null) presetReverb = PresetReverb(0, sessionId)
+            presetReverb?.apply {
+                preset = s.reverbMode.androidPreset
+                enabled = s.reverbMode != ReverbPresetMode.OFF
+            }
+        }
     }
 
     fun startSleepTimer(minutes: Int) {
@@ -605,9 +791,11 @@ class CroixPlayerController(
     fun release() {
         sleepJob?.cancel()
         playJob?.cancel()
+        outputMonitor.release()
         runCatching { equalizer?.release() }
         runCatching { bassBoost?.release() }
         runCatching { loudness?.release() }
+        runCatching { presetReverb?.release() }
         controller?.release()
         controller = null
     }

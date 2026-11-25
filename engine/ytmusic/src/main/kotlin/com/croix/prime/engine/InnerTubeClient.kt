@@ -578,6 +578,28 @@ class InnerTubeClient(
     }
 
     /**
+     * Multi-source lyrics fallback: fetches lyrics tab directly from YouTube Music `next` -> `browse`.
+     */
+    suspend fun fetchYtMusicLyrics(videoId: String): LyricsResult? = withContext(Dispatchers.IO) {
+        runCatching {
+            val nextPayload = buildWebRemixContext {
+                put("videoId", videoId)
+                put("isAudioOnly", true)
+            }
+            val nextRoot = json.parseToJsonElement(postInnerTube("next", nextPayload)).jsonObject
+            val lyricsBrowseId = findFirstBrowseIdWithPrefix(nextRoot, "MPLYt") ?: return@runCatching null
+
+            val browsePayload = buildWebRemixContext {
+                put("browseId", lyricsBrowseId)
+            }
+            val browseRoot = json.parseToJsonElement(postInnerTube("browse", browsePayload)).jsonObject
+            val shelf = findFirstObjectByKey(browseRoot, "musicDescriptionShelfRenderer") ?: return@runCatching null
+            val text = shelf["description"]?.let(::extractColumnText).orEmpty().trim()
+            if (text.isBlank()) null else LyricsResult(synced = emptyList(), plain = text, source = "YouTube Music")
+        }.getOrNull()
+    }
+
+    /**
      * Metrolist-grade multi-client audio stream resolver:
      * 1. Bootstraps visitorData + remembers last healthy client.
      * 2. Walks the verified 2026 fallback ladder (VISIONOS -> ANDROID_VR -> IOS -> IOS_MUSIC -> IPADOS -> ANDROID_TESTSUITE -> ANDROID_MUSIC -> MOBILE -> ANDROID_CREATOR -> TVHTML5 -> WEB_REMIX).

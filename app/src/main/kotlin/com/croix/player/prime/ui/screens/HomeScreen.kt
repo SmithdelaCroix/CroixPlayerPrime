@@ -35,12 +35,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -84,9 +87,14 @@ fun HomeScreen(
     moods: List<MoodChip>,
     favoriteIds: Set<String>,
     spotifyConnected: Boolean,
+    privateSessionEnabled: Boolean,
+    hiddenGemsLoading: Boolean,
     isLoading: Boolean,
     bottomPaddingDp: Int,
     onPlayFlow: (MoodChip?) -> Unit,
+    onStartHiddenGems: () -> Unit,
+    onOpenShazam: () -> Unit,
+    onTogglePrivateSession: () -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onOpenTrackMenu: (Track) -> Unit,
@@ -152,7 +160,16 @@ fun HomeScreen(
                         color = if (spotifyConnected) Color(0xFF1DB954) else palette.textSecondary,
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CroixGlassCard(
+                        cornerRadius = 50.dp,
+                        accentTint = palette.secondary,
+                        onClick = onOpenShazam,
+                    ) {
+                        IconButton(onClick = onOpenShazam, modifier = Modifier.size(42.dp)) {
+                            Icon(Icons.Rounded.GraphicEq, contentDescription = "Reconocer canción", tint = Color.White)
+                        }
+                    }
                     CroixGlassCard(cornerRadius = 50.dp, onClick = onRefresh) {
                         IconButton(onClick = onRefresh, modifier = Modifier.size(42.dp)) {
                             Icon(Icons.Rounded.Refresh, contentDescription = "Actualizar", tint = Color.White)
@@ -165,6 +182,43 @@ fun HomeScreen(
                     ) {
                         IconButton(onClick = onOpenSettings, modifier = Modifier.size(42.dp)) {
                             Icon(Icons.Rounded.Settings, contentDescription = strings.settingsTitle, tint = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 1b. Private Session (Incognito) Active Pill Banner
+        if (privateSessionEnabled) {
+            item {
+                CroixGlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp),
+                    accentTint = Color(0xFF9C27B0),
+                    cornerRadius = 18.dp,
+                    onClick = onTogglePrivateSession,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Rounded.VisibilityOff, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (strings.isSpanish) "Sesión Privada activa" else "Private Session active",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                            )
+                            Text(
+                                text = if (strings.isSpanish) "Historial, algoritmo, Discord y scrobbling en pausa. Toca para salir." else "History, algorithm, Discord & scrobbling paused. Tap to exit.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f),
+                            )
                         }
                     }
                 }
@@ -335,6 +389,75 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // 2b. Radar de Joyas Ocultas (100% Pure Discovery Card excluding all played/favorited tracks!)
+        item {
+            CroixGlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
+                accentTint = Color(0xFF00E5FF),
+                onClick = { if (!hiddenGemsLoading) onStartHiddenGems() },
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFF00E5FF).copy(alpha = 0.28f),
+                                    Color(0xFF7C4DFF).copy(alpha = 0.22f),
+                                    Color.Transparent,
+                                ),
+                            ),
+                        )
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF00E5FF).copy(alpha = 0.24f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (hiddenGemsLoading) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        } else {
+                            Icon(Icons.Rounded.Explore, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(26.dp))
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (strings.isSpanish) "Radar de Joyas Ocultas" else "Hidden Gems Radar",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                        )
+                        Text(
+                            text = if (strings.isSpanish) "Descubrimiento puro: 0 canciones repetidas de tu historial" else "Pure discovery: 0 repeated tracks from your history",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.textSecondary,
+                            maxLines = 2,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
                     }
                 }
             }

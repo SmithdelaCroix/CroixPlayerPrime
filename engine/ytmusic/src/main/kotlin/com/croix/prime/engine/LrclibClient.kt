@@ -61,6 +61,45 @@ class LrclibClient {
     private val http = HttpClient(OkHttp)
     private val cache = ConcurrentHashMap<String, LyricsResult>()
 
+    suspend fun fetchLyricsMultiSource(
+        track: Track,
+        innerTube: InnerTubeClient? = null,
+        spotifyClient: SpotifyTasteClient? = null,
+        spotifySpDc: String = "",
+        spotifySpKey: String = "",
+    ): LyricsResult? = withContext(Dispatchers.IO) {
+        cache[track.id]?.let { return@withContext it }
+
+        // 1. Primary: LRCLib (exact match + fuzzy search)
+        val fromLrclib = fetchLyrics(track)
+        if (fromLrclib != null && fromLrclib.synced.isNotEmpty()) {
+            return@withContext fromLrclib
+        }
+
+        // 2. Fallback A: Spotify Color-Lyrics (line-synced when user has Spotify connected)
+        if (spotifyClient != null && spotifySpDc.isNotBlank()) {
+            val fromSpotify = runCatching {
+                spotifyClient.fetchColorLyrics(spotifySpDc, spotifySpKey, track.title, track.artist)
+            }.getOrNull()
+            if (fromSpotify != null && (fromSpotify.synced.isNotEmpty() || fromSpotify.plain.isNotBlank())) {
+                cache[track.id] = fromSpotify
+                return@withContext fromSpotify
+            }
+        }
+
+        if (fromLrclib != null) return@withContext fromLrclib
+
+        // 3. Fallback B: YouTube Music Lyrics browse tab
+        if (innerTube != null) {
+            val fromYt = runCatching { innerTube.fetchYtMusicLyrics(track.id) }.getOrNull()
+            if (fromYt != null) {
+                cache[track.id] = fromYt
+                return@withContext fromYt
+            }
+        }
+        null
+    }
+
     suspend fun fetchLyrics(track: Track): LyricsResult? = withContext(Dispatchers.IO) {
         cache[track.id]?.let { return@withContext it }
 

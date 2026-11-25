@@ -4,14 +4,21 @@
 
 package com.croix.prime.playback
 
+import android.content.Context
 import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -59,7 +66,37 @@ class CroixPlaybackService : MediaSessionService() {
                 chain.proceed(updated.build())
             }
             .build()
-        val dataSourceFactory = OkHttpDataSource.Factory(okHttp)
+
+        val httpFactory = OkHttpDataSource.Factory(okHttp)
+        val upstreamFactory = DefaultDataSource.Factory(this, httpFactory)
+        val audioCache = CroixAudioCache.getOrCreate(this)
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(audioCache)
+            .setUpstreamDataSourceFactory(upstreamFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+        // Dynamic factory: routes through SimpleCache when Smart Audio Cache is enabled,
+        // or directly to upstream when the user sets Cache = Off (0 MB).
+        val smartDataSourceFactory = DataSource.Factory {
+            if (CroixAudioCache.cachingEnabled) {
+                cacheDataSourceFactory.createDataSource()
+            } else {
+                upstreamFactory.createDataSource()
+            }
+        }
+
+        // Custom RenderersFactory attaching real-time PCM 8D Spatial Audio Processor
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .setAudioProcessors(arrayOf(CroixAudioSessionBridge.audio8dProcessor))
+                .build()
+        }.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -77,8 +114,8 @@ class CroixPlaybackService : MediaSessionService() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        val exo = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+        val exo = ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(smartDataSourceFactory))
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
@@ -118,6 +155,9 @@ object CroixAudioSessionBridge {
 
     @Volatile
     var exoPlayerRef: ExoPlayer? = null
+
+    @OptIn(UnstableApi::class)
+    val audio8dProcessor: Croix8dAudioProcessor = Croix8dAudioProcessor()
 
     private val streamHeadersByUrl = ConcurrentHashMap<String, StreamRequestHeaders>()
 

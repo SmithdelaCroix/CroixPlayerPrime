@@ -14,6 +14,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.croix.prime.engine.Track
 import kotlinx.coroutines.flow.Flow
 
@@ -43,6 +45,25 @@ data class HistoryTrackEntity(
 ) {
     fun toTrack() = Track(id, title, artist, album, durationSeconds, thumbnailUrl)
 }
+
+@Entity(tableName = "play_events")
+data class PlayEventEntity(
+    @PrimaryKey(autoGenerate = true) val eventId: Long = 0L,
+    val trackId: String,
+    val title: String,
+    val artist: String,
+    val durationSeconds: Int,
+    val playedAtMs: Long = System.currentTimeMillis(),
+    val hourOfDay: Int, // 0..23
+    val dayOfWeek: Int, // 0=Mon .. 6=Sun
+)
+
+@Entity(tableName = "blocked_artists")
+data class BlockedArtistEntity(
+    @PrimaryKey val artistKey: String,
+    val displayName: String,
+    val blockedAtMs: Long = System.currentTimeMillis(),
+)
 
 @Entity(tableName = "downloads")
 data class DownloadedTrackEntity(
@@ -90,6 +111,10 @@ data class ListeningStatsSummary(
     val estimatedMinutes: Int = 0,
     val topArtists: List<Pair<String, Int>> = emptyList(),
     val topTracks: List<Pair<Track, Int>> = emptyList(),
+    val hourlyPlays: List<Int> = List(24) { 0 },
+    val weekdayPlays: List<Int> = List(7) { 0 },
+    val peakHour: Int = -1,
+    val peakWeekday: Int = -1,
 )
 
 @Dao
@@ -103,7 +128,7 @@ interface CroixDao {
     @Query("DELETE FROM favorites WHERE id = :id")
     suspend fun removeFavorite(id: String)
 
-    @Query("SELECT * FROM history ORDER BY playedAtMs DESC LIMIT 100")
+    @Query("SELECT * FROM history ORDER BY playedAtMs DESC LIMIT 200")
     fun observeHistory(): Flow<List<HistoryTrackEntity>>
 
     @Query("SELECT * FROM history WHERE id = :id LIMIT 1")
@@ -111,6 +136,21 @@ interface CroixDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertHistory(item: HistoryTrackEntity)
+
+    @Query("SELECT * FROM play_events ORDER BY playedAtMs DESC LIMIT 1000")
+    fun observePlayEvents(): Flow<List<PlayEventEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPlayEvent(event: PlayEventEntity)
+
+    @Query("SELECT * FROM blocked_artists ORDER BY blockedAtMs DESC")
+    fun observeBlockedArtists(): Flow<List<BlockedArtistEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun blockArtist(artist: BlockedArtistEntity)
+
+    @Query("DELETE FROM blocked_artists WHERE artistKey = :artistKey")
+    suspend fun unblockArtist(artistKey: String)
 
     @Query("SELECT * FROM downloads ORDER BY downloadedAtMs DESC")
     fun observeDownloads(): Flow<List<DownloadedTrackEntity>>
@@ -156,12 +196,14 @@ interface CroixDao {
     entities = [
         FavoriteTrackEntity::class,
         HistoryTrackEntity::class,
+        PlayEventEntity::class,
+        BlockedArtistEntity::class,
         DownloadedTrackEntity::class,
         UserPlaylistEntity::class,
         PlaylistTrackEntity::class,
         RecentSearchEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class CroixDatabase : RoomDatabase() {
@@ -171,6 +213,35 @@ abstract class CroixDatabase : RoomDatabase() {
         @Volatile
         private var instance: CroixDatabase? = null
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `play_events` (
+                        `eventId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `trackId` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `durationSeconds` INTEGER NOT NULL,
+                        `playedAtMs` INTEGER NOT NULL,
+                        `hourOfDay` INTEGER NOT NULL,
+                        `dayOfWeek` INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `blocked_artists` (
+                        `artistKey` TEXT NOT NULL,
+                        `displayName` TEXT NOT NULL,
+                        `blockedAtMs` INTEGER NOT NULL,
+                        PRIMARY KEY(`artistKey`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         fun get(context: Context): CroixDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -178,6 +249,7 @@ abstract class CroixDatabase : RoomDatabase() {
                     CroixDatabase::class.java,
                     "croix_prime.db",
                 )
+                    .addMigrations(MIGRATION_3_4)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }

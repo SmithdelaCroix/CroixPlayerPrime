@@ -305,6 +305,56 @@ class SpotifyTasteClient {
             ?.groupValues
             ?.get(1)
 
+    /**
+     * Multi-source synced lyrics fallback using Spotify's Color-Lyrics v2 endpoint.
+     */
+    suspend fun fetchColorLyrics(
+        spDc: String,
+        spKey: String,
+        title: String,
+        artist: String,
+    ): LyricsResult? = withContext(Dispatchers.IO) {
+        if (spDc.isBlank() || title.isBlank()) return@withContext null
+        runCatching {
+            val token = fetchAccessToken(spDc, spKey).getOrThrow().accessToken
+            val cleanArtist = artist.split(",", "&", "feat.", "ft.", ignoreCase = true).firstOrNull()?.trim().orEmpty()
+            val q = java.net.URLEncoder.encode("$title $cleanArtist".trim(), "UTF-8")
+            val searchRoot = restGet(token, "search?q=$q&type=track&limit=1")
+            val trackId = searchRoot.obj("tracks")?.arr("items")?.firstOrNull()?.jsonObject?.str("id")
+                ?: return@runCatching null
+
+            val resp = http.get("https://spclient.wg.spotify.com/color-lyrics/v2/track/$trackId?format=json&vocalRemoval=false&market=from_token") {
+                header("Authorization", "Bearer $token")
+                header("app-platform", "WebPlayer")
+                header("User-Agent", USER_AGENT)
+                header("Accept", "application/json")
+            }
+            if (resp.status.value !in 200..299) return@runCatching null
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val lyricsObj = root.obj("lyrics") ?: return@runCatching null
+            val syncType = lyricsObj.str("syncType").orEmpty()
+            val linesArr = lyricsObj.arr("lines").orEmpty()
+            if (linesArr.isEmpty()) return@runCatching null
+
+            val synced = mutableListOf<SyncedLyricLine>()
+            val plainBuilder = StringBuilder()
+            linesArr.forEach { elem ->
+                val o = elem.jsonObject
+                val words = o.str("words").orEmpty().trim()
+                if (words.isNotBlank() && words != "♪") {
+                    val startMs = o.str("startTimeMs")?.toLongOrNull() ?: 0L
+                    if (syncType == "LINE_SYNCED" && startMs >= 0L) {
+                        synced += SyncedLyricLine(timeMs = startMs, text = words)
+                    }
+                    if (plainBuilder.isNotEmpty()) plainBuilder.append('\n')
+                    plainBuilder.append(words)
+                }
+            }
+            if (synced.isEmpty() && plainBuilder.isEmpty()) null
+            else LyricsResult(synced = synced, plain = plainBuilder.toString(), source = "Spotify Lyrics")
+        }.getOrNull()
+    }
+
     private suspend fun fetchProfile(token: String): Pair<String, String> {
         runCatching {
             val root = graphqlPost(token, "profileAttributes")

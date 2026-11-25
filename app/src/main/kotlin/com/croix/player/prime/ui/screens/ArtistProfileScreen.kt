@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
@@ -73,8 +74,10 @@ fun ArtistProfileOverlay(
     profile: ArtistProfile,
     isLoading: Boolean,
     favoriteIds: Set<String>,
+    isArtistBlocked: Boolean,
     bottomPaddingDp: Int,
     onClose: () -> Unit,
+    onToggleBlockArtist: (String) -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onOpenTrackMenu: (Track) -> Unit,
@@ -183,20 +186,50 @@ fun ArtistProfileOverlay(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        CroixGlassCard(
-                            cornerRadius = 50.dp,
-                            onClick = {
-                                val shuffled = profile.topTracks.shuffled()
-                                onPlayTrack(shuffled.first(), shuffled)
-                            },
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CroixGlassCard(
+                                cornerRadius = 50.dp,
+                                onClick = {
+                                    val shuffled = profile.topTracks.shuffled()
+                                    onPlayTrack(shuffled.first(), shuffled)
+                                },
                             ) {
-                                Icon(Icons.Rounded.Shuffle, null, tint = palette.primary, modifier = Modifier.size(20.dp))
-                                Text(strings.shuffle, color = Color.White, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(Icons.Rounded.Shuffle, null, tint = palette.primary, modifier = Modifier.size(20.dp))
+                                    Text(strings.shuffle, color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            CroixGlassCard(
+                                cornerRadius = 50.dp,
+                                accentTint = if (isArtistBlocked) Color(0xFFFF5252) else null,
+                                onClick = { onToggleBlockArtist(profile.name) },
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Block,
+                                        null,
+                                        tint = if (isArtistBlocked) Color.White else palette.textSecondary,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Text(
+                                        text = if (isArtistBlocked) {
+                                            if (strings.isSpanish) "Bloqueado" else "Blocked"
+                                        } else {
+                                            if (strings.isSpanish) "Bloquear" else "Block"
+                                        },
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
                             }
                         }
 
@@ -547,7 +580,7 @@ fun AlbumDetailOverlay(
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = Color.White)
                         }
                     }
-                    Text("Release", style = MaterialTheme.typography.titleLarge, color = palette.textSecondary)
+                    Text(if (strings.isSpanish) "Lanzamiento" else "Release", style = MaterialTheme.typography.titleLarge, color = palette.textSecondary)
                 }
             }
 
@@ -587,7 +620,7 @@ fun AlbumDetailOverlay(
                                     ) {
                                         Icon(Icons.Rounded.PlayArrow, null, tint = Color.White)
                                         Spacer(Modifier.width(6.dp))
-                                        Text("Play", color = Color.White, fontWeight = FontWeight.Bold)
+                                        Text(strings.playAll, color = Color.White, fontWeight = FontWeight.Bold)
                                     }
                                 }
                                 CroixGlassCard(
@@ -604,7 +637,7 @@ fun AlbumDetailOverlay(
                                     ) {
                                         Icon(Icons.Rounded.Shuffle, null, tint = Color.White)
                                         Spacer(Modifier.width(6.dp))
-                                        Text("Shuffle", color = Color.White, fontWeight = FontWeight.Bold)
+                                        Text(strings.shuffle, color = Color.White, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }

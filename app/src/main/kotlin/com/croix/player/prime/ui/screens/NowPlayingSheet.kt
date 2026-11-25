@@ -4,12 +4,18 @@
 
 package com.croix.player.prime.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -100,8 +106,10 @@ import com.croix.prime.design.CroixGlassCard
 import com.croix.prime.design.CroixSeekBar
 import com.croix.prime.design.LocalCroixDesign
 import com.croix.prime.design.LocalCroixPalette
+import com.croix.prime.design.LocalCroixStrings
 import com.croix.prime.design.PrimeLyricsAlign
 import com.croix.prime.design.PrimePlayerStyle
+import com.croix.prime.design.PrimeTransitionStyle
 import com.croix.prime.engine.LrcParser
 import com.croix.prime.engine.LyricsResult
 import com.croix.prime.engine.Track
@@ -258,6 +266,7 @@ fun NowPlayingOverlay(
     val track = playback.currentTrack ?: return
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
+    val strings = LocalCroixStrings.current
     var activePanel by remember { mutableIntStateOf(0) } // 0=Player, 1=Lyrics, 2=Queue, 3=EQ/Speed/Sleep
     var carMode by remember { mutableStateOf(false) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
@@ -333,7 +342,7 @@ fun NowPlayingOverlay(
                     }
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("PLAYING NOW", style = MaterialTheme.typography.labelMedium, color = palette.textSecondary)
+                    Text(strings.playingNow, style = MaterialTheme.typography.labelMedium, color = palette.textSecondary)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (playback.isPlayingOfflineFile) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -376,7 +385,7 @@ fun NowPlayingOverlay(
                 }
             }
 
-            // Center Dynamic Panel
+            // Center Dynamic Panel (smooth fade + subtle scale transitions between Player / Lyrics / Queue / Audio)
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -384,7 +393,21 @@ fun NowPlayingOverlay(
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                when (activePanel) {
+                val panelDur = (240f / design.transitionSpeed).toInt().coerceIn(80, 480)
+                AnimatedContent(
+                    targetState = activePanel,
+                    transitionSpec = {
+                        when (design.transitionStyle) {
+                            PrimeTransitionStyle.NONE -> fadeIn(tween(1)).togetherWith(fadeOut(tween(1)))
+                            PrimeTransitionStyle.GENTLE_FADE -> fadeIn(tween(panelDur)).togetherWith(fadeOut(tween(panelDur / 2)))
+                            else -> (fadeIn(tween(panelDur, easing = FastOutSlowInEasing)) +
+                                scaleIn(tween(panelDur, easing = FastOutSlowInEasing), initialScale = 0.96f))
+                                .togetherWith(fadeOut(tween((panelDur * 0.7f).toInt(), easing = FastOutSlowInEasing)))
+                        }
+                    },
+                    label = "player_panel_transition",
+                ) { panel ->
+                when (panel) {
                     0 -> {
                         val artShape = if (design.vinylSpinEnabled) CircleShape else RoundedCornerShape(design.artworkCornerDp.dp)
                         val artFill = when (design.playerStyle) {
@@ -469,6 +492,7 @@ fun NowPlayingOverlay(
                         onSetBassBoost = onSetBassBoost,
                         onSetLoudness = onSetLoudness,
                     )
+                }
                 }
             }
 
@@ -589,13 +613,13 @@ fun NowPlayingOverlay(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
-                        PanelToggleIcon(Icons.Rounded.Lyrics, "Lyrics", activePanel == 1) {
+                        PanelToggleIcon(Icons.Rounded.Lyrics, strings.lyrics, activePanel == 1) {
                             activePanel = if (activePanel == 1) 0 else 1
                         }
-                        PanelToggleIcon(Icons.Rounded.QueueMusic, "Queue", activePanel == 2) {
+                        PanelToggleIcon(Icons.Rounded.QueueMusic, strings.queue, activePanel == 2) {
                             activePanel = if (activePanel == 2) 0 else 2
                         }
-                        PanelToggleIcon(Icons.Rounded.Equalizer, "Audio", activePanel == 3) {
+                        PanelToggleIcon(Icons.Rounded.Equalizer, strings.audio, activePanel == 3) {
                             activePanel = if (activePanel == 3) 0 else 3
                         }
                     }

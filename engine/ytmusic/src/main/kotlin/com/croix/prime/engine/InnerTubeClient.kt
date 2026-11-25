@@ -109,6 +109,81 @@ class InnerTubeClient(
         }.getOrElse { emptyList() }
     }
 
+    suspend fun searchArtists(query: String, limit: Int = 15): List<RelatedArtist> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        runCatching {
+            val payload = buildWebRemixContext {
+                put("query", query.trim())
+                put("params", "EgWKAQIgAWoKEAkQBRAKEAMQBA%3D%3D")
+            }
+            val raw = postInnerTube("search", payload)
+            val root = json.parseToJsonElement(raw).jsonObject
+            val out = mutableListOf<RelatedArtist>()
+            findAllObjectsByKey(root, "musicResponsiveListItemRenderer").forEach { item ->
+                val bid = item["navigationEndpoint"]?.jsonObject
+                    ?.get("browseEndpoint")?.jsonObject
+                    ?.get("browseId")?.jsonPrimitive?.contentOrNull
+                val cols = item["flexColumns"]?.jsonArray
+                val name = cols?.getOrNull(0)?.let(::extractColumnText).orEmpty()
+                val subs = cols?.getOrNull(1)?.let(::extractColumnText).orEmpty()
+                val thumb = upgradeThumbResolution(extractBestThumbnail(item["thumbnail"]))
+                if (!bid.isNullOrBlank() && bid.startsWith("UC") && name.isNotBlank()) {
+                    out += RelatedArtist(bid, name, subs, thumb)
+                }
+            }
+            out.distinctBy { it.browseId }.take(limit)
+        }.getOrElse { emptyList() }
+    }
+
+    suspend fun searchAlbums(query: String, limit: Int = 15): List<AlbumSummary> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        runCatching {
+            val payload = buildWebRemixContext {
+                put("query", query.trim())
+                put("params", "EgWKAQIYAWoKEAkQBRAKEAMQBA%3D%3D")
+            }
+            val raw = postInnerTube("search", payload)
+            val root = json.parseToJsonElement(raw).jsonObject
+            val out = mutableListOf<AlbumSummary>()
+            findAllObjectsByKey(root, "musicResponsiveListItemRenderer").forEach { item ->
+                val bid = item["navigationEndpoint"]?.jsonObject
+                    ?.get("browseEndpoint")?.jsonObject
+                    ?.get("browseId")?.jsonPrimitive?.contentOrNull
+                val cols = item["flexColumns"]?.jsonArray
+                val title = cols?.getOrNull(0)?.let(::extractColumnText).orEmpty()
+                val subRuns = cols?.getOrNull(1)?.let(::extractColumnRuns).orEmpty()
+                val year = subRuns.firstOrNull { it.length == 4 && it.all(Char::isDigit) }
+                    ?: subRuns.firstOrNull { it != " • " && !it.equals("Album", true) }.orEmpty()
+                val thumb = upgradeThumbResolution(extractBestThumbnail(item["thumbnail"]))
+                if (!bid.isNullOrBlank() && title.isNotBlank()) {
+                    out += AlbumSummary(bid, title, year, thumb, isSingle = false)
+                }
+            }
+            out.distinctBy { it.browseId }.take(limit)
+        }.getOrElse { emptyList() }
+    }
+
+    suspend fun importPlaylistFromUrl(rawUrl: String): Result<Pair<String, List<Track>>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val listId = Regex("""[?&]list=([A-Za-z0-9_-]+)""").find(rawUrl.trim())?.groupValues?.get(1)
+                ?: rawUrl.trim().takeIf { it.startsWith("PL") || it.startsWith("OLAK") || it.startsWith("RDCLAK") }
+                ?: error("Invalid YouTube / YouTube Music playlist URL")
+
+            val browseId = if (listId.startsWith("VL")) listId else "VL$listId"
+            val payload = buildWebRemixContext {
+                put("browseId", browseId)
+            }
+            val raw = postInnerTube("browse", payload)
+            val root = json.parseToJsonElement(raw).jsonObject
+            val header = findFirstObjectByKey(root, "musicResponsiveHeaderRenderer")
+                ?: findFirstObjectByKey(root, "musicDetailHeaderRenderer")
+            val title = header?.get("title")?.let(::extractColumnText).orEmpty().ifBlank { "Imported Playlist" }
+            val tracks = extractTracksFromTree(root).distinctBy { it.id }
+            if (tracks.isEmpty()) error("No playable tracks found in playlist")
+            title to tracks
+        }
+    }
+
     suspend fun fetchArtistProfile(
         artistName: String,
         browseId: String? = null,

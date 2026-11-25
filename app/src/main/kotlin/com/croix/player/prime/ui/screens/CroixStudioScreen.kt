@@ -6,6 +6,14 @@ package com.croix.player.prime.ui.screens
 
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -70,13 +78,16 @@ import com.croix.prime.design.CroixGlassCard
 import com.croix.prime.design.CroixThemeJson
 import com.croix.prime.design.LocalCroixDesign
 import com.croix.prime.design.LocalCroixPalette
+import com.croix.prime.design.LocalCroixStrings
 import com.croix.prime.design.PrimeCardDensity
 import com.croix.prime.design.PrimeColorMode
+import com.croix.prime.design.PrimeLanguageMode
 import com.croix.prime.design.PrimeLyricsAlign
 import com.croix.prime.design.PrimeNavBarStyle
 import com.croix.prime.design.PrimePlayerStyle
 import com.croix.prime.design.PrimePresets
 import com.croix.prime.design.PrimeProgressStyle
+import com.croix.prime.design.PrimeTransitionStyle
 import com.croix.prime.design.PrimeVisualizerStyle
 import com.croix.prime.playback.EqPreset
 import com.croix.prime.playback.PlaybackUiState
@@ -107,6 +118,7 @@ fun SettingsAndStudioOverlay(
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
+    val strings = LocalCroixStrings.current
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val touchBlocker = remember { MutableInteractionSource() }
@@ -128,51 +140,82 @@ fun SettingsAndStudioOverlay(
     ) {
         CroixAnimatedBackdrop()
 
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding(),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CroixGlassCard(
+                    cornerRadius = 50.dp,
+                    onClick = { if (page == SettingsPage.HOME) onClose() else page = SettingsPage.HOME },
                 ) {
-                    CroixGlassCard(
-                        cornerRadius = 50.dp,
+                    IconButton(
                         onClick = { if (page == SettingsPage.HOME) onClose() else page = SettingsPage.HOME },
+                        modifier = Modifier.size(42.dp),
                     ) {
-                        IconButton(
-                            onClick = { if (page == SettingsPage.HOME) onClose() else page = SettingsPage.HOME },
-                            modifier = Modifier.size(42.dp),
-                        ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = Color.White)
-                        }
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
-                    Column {
-                        Text(page.title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
-                        if (page == SettingsPage.HOME) {
-                            Text(
-                                "Croix Player Prime • ARMv8 / ARMv9 • Android 12+",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = palette.textSecondary,
-                            )
-                        }
+                }
+                Column {
+                    val pageTitle = when (page) {
+                        SettingsPage.HOME -> strings.settingsTitle
+                        SettingsPage.STUDIO -> strings.settingsAppearance
+                        SettingsPage.AUDIO -> strings.settingsAudio
+                        SettingsPage.GESTURES -> strings.settingsGestures
+                        SettingsPage.SPONSORBLOCK -> strings.settingsSponsorBlock
+                    }
+                    Text(pageTitle, style = MaterialTheme.typography.headlineMedium, color = Color.White)
+                    if (page == SettingsPage.HOME) {
+                        Text(
+                            "Croix Player Prime • ARMv8 / ARMv9 • Android 12+",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.textSecondary,
+                        )
                     }
                 }
             }
 
-            when (page) {
+            AnimatedContent(
+                targetState = page,
+                transitionSpec = {
+                    val enteringSubmenu = targetState != SettingsPage.HOME
+                    val dir = if (enteringSubmenu) 1 else -1
+                    val dur = (260f / design.transitionSpeed).toInt().coerceIn(90, 500)
+                    when (design.transitionStyle) {
+                        PrimeTransitionStyle.NONE -> fadeIn(tween(1)).togetherWith(fadeOut(tween(1)))
+                        PrimeTransitionStyle.GENTLE_FADE -> fadeIn(tween(dur)).togetherWith(fadeOut(tween(dur / 2)))
+                        PrimeTransitionStyle.SNAPPY_ZOOM, PrimeTransitionStyle.SMOOTH_SLIDE ->
+                            (fadeIn(tween(dur, easing = FastOutSlowInEasing)) +
+                                slideInHorizontally(tween(dur, easing = FastOutSlowInEasing)) { dir * (it / 5) })
+                                .togetherWith(
+                                    fadeOut(tween((dur * 0.7f).toInt(), easing = FastOutSlowInEasing)) +
+                                        slideOutHorizontally(tween((dur * 0.8f).toInt(), easing = FastOutSlowInEasing)) { -dir * (it / 6) },
+                                )
+                    }
+                },
+                label = "settings_submenu_transition",
+                modifier = Modifier.weight(1f),
+            ) { activePage ->
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 36.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    when (activePage) {
                 SettingsPage.HOME -> {
                     item {
                         SettingsMenuRow(
                             icon = Icons.Rounded.Palette,
-                            title = "Appearance & Studio",
-                            subtitle = "Glassmorphism, Gradient / Solid Color, Home, Player, Presets",
+                            title = strings.settingsAppearance,
+                            subtitle = strings.settingsAppearanceSub,
                             accent = palette.primary,
                             onClick = { page = SettingsPage.STUDIO },
                         )
@@ -180,8 +223,8 @@ fun SettingsAndStudioOverlay(
                     item {
                         SettingsMenuRow(
                             icon = Icons.Rounded.Equalizer,
-                            title = "Audio, Equalizer & Speed",
-                            subtitle = "Speed (${"%.2f".format(playback.playbackSpeed)}x), Pitch, Skip Silence, 5-Band EQ",
+                            title = strings.settingsAudio,
+                            subtitle = "${"%.2f".format(playback.playbackSpeed)}x • Crossfade: ${if (design.crossfadeSeconds == 0) strings.crossfadeOff else "${design.crossfadeSeconds}s"} • 5-Band EQ",
                             accent = palette.secondary,
                             onClick = { page = SettingsPage.AUDIO },
                         )
@@ -189,8 +232,8 @@ fun SettingsAndStudioOverlay(
                     item {
                         SettingsMenuRow(
                             icon = Icons.Rounded.TouchApp,
-                            title = "Gestures & Hardware",
-                            subtitle = "Swipe artwork, double-tap seek, Shake-to-Skip",
+                            title = strings.settingsGestures,
+                            subtitle = strings.settingsGesturesSub,
                             accent = palette.primary,
                             onClick = { page = SettingsPage.GESTURES },
                         )
@@ -198,11 +241,29 @@ fun SettingsAndStudioOverlay(
                     item {
                         SettingsMenuRow(
                             icon = Icons.Rounded.Shield,
-                            title = "SponsorBlock",
-                            subtitle = if (design.sponsorBlockEnabled) "Auto-skipping non-music & sponsors" else "Disabled",
+                            title = strings.settingsSponsorBlock,
+                            subtitle = if (design.sponsorBlockEnabled) {
+                                if (strings.isSpanish) "Saltando intros y secciones no musicales" else "Auto-skipping non-music & sponsors"
+                            } else {
+                                if (strings.isSpanish) "Desactivado" else "Disabled"
+                            },
                             accent = palette.secondary,
                             onClick = { page = SettingsPage.SPONSORBLOCK },
                         )
+                    }
+                    item {
+                        CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                StudioEnumRow(
+                                    title = strings.settingsLanguage,
+                                    entries = PrimeLanguageMode.entries,
+                                    selected = design.languageMode,
+                                    labelOf = { if (strings.isSpanish) it.labelEs else it.labelEn },
+                                ) { lang ->
+                                    onUpdateDesign { it.copy(languageMode = lang) }
+                                }
+                            }
+                        }
                     }
                     item {
                         CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -213,7 +274,7 @@ fun SettingsAndStudioOverlay(
                             ) {
                                 Icon(Icons.Rounded.Info, null, tint = palette.textSecondary)
                                 Column {
-                                    Text("Croix Player Prime v2.3.0", color = Color.White, fontWeight = FontWeight.Bold)
+                                    Text("Croix Player Prime v2.4.0", color = Color.White, fontWeight = FontWeight.Bold)
                                     Text("120fps Glass Engine • arm64-v8a • GPL-3.0", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
                                 }
                             }
@@ -273,6 +334,21 @@ fun SettingsAndStudioOverlay(
                                         if (design.backdropMotionEnabled) {
                                             StudioSlider("Animation Speed", design.backdropMotionSpeed, 0.2f..2.5f, "${"%.1f".format(design.backdropMotionSpeed)}x") { v ->
                                                 onUpdateDesign { it.copy(backdropMotionSpeed = v) }
+                                            }
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(strings.transitionsTitle, color = palette.primary, fontWeight = FontWeight.Bold)
+                                        StudioEnumRow(
+                                            title = strings.transitionStyleLabel,
+                                            entries = PrimeTransitionStyle.entries,
+                                            selected = design.transitionStyle,
+                                            labelOf = { if (strings.isSpanish) it.labelEs else it.labelEn },
+                                        ) { ts ->
+                                            onUpdateDesign { it.copy(transitionStyle = ts) }
+                                        }
+                                        if (design.transitionStyle != PrimeTransitionStyle.NONE) {
+                                            StudioSlider(strings.transitionSpeedLabel, design.transitionSpeed, 0.5f..2.0f, "${"%.1f".format(design.transitionSpeed)}x") { v ->
+                                                onUpdateDesign { it.copy(transitionSpeed = v) }
                                             }
                                         }
                                     }
@@ -444,6 +520,14 @@ fun SettingsAndStudioOverlay(
                                 StudioSlider("Playback Speed", playback.playbackSpeed, 0.5f..2.0f, "${"%.2f".format(playback.playbackSpeed)}x", onSetSpeed)
                                 StudioSlider("Playback Pitch", playback.playbackPitch, 0.5f..2.0f, "${"%.2f".format(playback.playbackPitch)}x", onSetPitch)
                                 StudioSwitch("Skip Silence", playback.skipSilenceEnabled, onSetSkipSilence)
+                                StudioSlider(
+                                    label = strings.crossfadeLabel,
+                                    value = design.crossfadeSeconds.toFloat(),
+                                    range = 0f..10f,
+                                    valueLabel = if (design.crossfadeSeconds == 0) strings.crossfadeOff else "${design.crossfadeSeconds}s",
+                                ) { v ->
+                                    onUpdateDesign { it.copy(crossfadeSeconds = v.roundToInt()) }
+                                }
 
                                 Spacer(Modifier.height(4.dp))
                                 Text("5-Band Hardware Equalizer", color = palette.primary, fontWeight = FontWeight.Bold)
@@ -506,6 +590,8 @@ fun SettingsAndStudioOverlay(
                             }
                         }
                     }
+                }
+            }
                 }
             }
         }

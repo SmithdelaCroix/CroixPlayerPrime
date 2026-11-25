@@ -46,6 +46,7 @@ import coil3.compose.AsyncImage
 import com.croix.prime.design.CroixGlassCard
 import com.croix.prime.design.LocalCroixDesign
 import com.croix.prime.design.LocalCroixPalette
+import com.croix.prime.design.LocalCroixStrings
 import com.croix.prime.design.PrimeCardDensity
 import com.croix.prime.engine.HomeSection
 import com.croix.prime.engine.MoodChip
@@ -67,6 +68,7 @@ fun HomeScreen(
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
+    val strings = LocalCroixStrings.current
     val cardSize = when (design.cardDensity) {
         PrimeCardDensity.COMPACT -> 124.dp
         PrimeCardDensity.EDITORIAL -> 150.dp
@@ -88,7 +90,7 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "Home",
+                    text = strings.homeTitle,
                     style = MaterialTheme.typography.headlineLarge,
                     color = Color.White,
                 )
@@ -157,18 +159,18 @@ fun HomeScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = "FLOW",
+                                        text = strings.flowTag,
                                         style = MaterialTheme.typography.labelMedium,
                                         color = Color.White.copy(alpha = 0.90f),
                                     )
                                 }
                                 Text(
-                                    text = "Your infinite mix",
+                                    text = strings.flowTitle,
                                     style = MaterialTheme.typography.headlineMedium,
                                     color = Color.White,
                                 )
                                 Text(
-                                    text = "Tailored tracks blended non-stop with SponsorBlock.",
+                                    text = strings.flowSubtitle,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color.White.copy(alpha = 0.80f),
                                     maxLines = 2,
@@ -205,7 +207,7 @@ fun HomeScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Moods",
+                        text = strings.moodsTitle,
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
                         modifier = Modifier.padding(horizontal = 18.dp),
@@ -253,7 +255,7 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        text = "Recently played",
+                        text = strings.recentlyPlayed,
                         style = MaterialTheme.typography.titleLarge,
                         color = Color.White,
                     )

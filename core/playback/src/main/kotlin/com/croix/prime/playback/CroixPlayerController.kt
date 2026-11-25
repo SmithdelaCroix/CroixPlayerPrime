@@ -77,6 +77,7 @@ class CroixPlayerController(
     private val sponsorBlock: SponsorBlockClient,
     private val localFileProvider: (String) -> File?,
     private val enabledCategoriesProvider: () -> Set<String>,
+    private val crossfadeSecondsProvider: () -> Int = { 0 },
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -91,6 +92,7 @@ class CroixPlayerController(
     private var controller: MediaController? = null
     private var playJob: Job? = null
     private var sleepJob: Job? = null
+    private var crossfadeTriggeredForTrackId: String? = null
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
     private var loudness: LoudnessEnhancer? = null
@@ -161,6 +163,24 @@ class CroixPlayerController(
                                 delay(3_000L)
                                 _state.update { it.copy(lastSkippedNotice = null) }
                             }
+                        }
+                    }
+
+                    // Optional smooth Crossfade when approaching end of track (0s = disabled)
+                    val cfSec = crossfadeSecondsProvider().coerceIn(0, 10)
+                    val curId = _state.value.currentTrack?.id
+                    if (cfSec > 0 && mc.isPlaying && dur > (cfSec + 4) * 1000L && !_state.value.repeatOne && _state.value.sleepTimerRemainingSec == 0) {
+                        val remainingMs = dur - pos
+                        val cfMs = cfSec * 1000L
+                        if (remainingMs in 1L..cfMs) {
+                            val vol = (remainingMs.toFloat() / cfMs.toFloat()).coerceIn(0.06f, 1f)
+                            mc.volume = vol
+                            if (remainingMs <= 500L && crossfadeTriggeredForTrackId != curId) {
+                                crossfadeTriggeredForTrackId = curId
+                                skipNext()
+                            }
+                        } else if (mc.volume < 0.99f && pos > cfMs) {
+                            mc.volume = 1f
                         }
                     }
                 }
@@ -287,7 +307,23 @@ class CroixPlayerController(
                 mc.setPlaybackParameters(PlaybackParameters(_state.value.playbackSpeed, _state.value.playbackPitch))
                 CroixAudioSessionBridge.exoPlayerRef?.skipSilenceEnabled = _state.value.skipSilenceEnabled
                 mc.prepare()
-                mc.play()
+                val cfSec = crossfadeSecondsProvider().coerceIn(0, 10)
+                if (cfSec > 0 && crossfadeTriggeredForTrackId != null) {
+                    crossfadeTriggeredForTrackId = null
+                    mc.volume = 0.08f
+                    mc.play()
+                    scope.launch {
+                        val steps = (cfSec * 5).coerceIn(5, 25)
+                        for (i in 1..steps) {
+                            delay(100L)
+                            mc.volume = (i.toFloat() / steps.toFloat()).coerceIn(0.08f, 1f)
+                        }
+                        mc.volume = 1f
+                    }
+                } else {
+                    mc.volume = 1f
+                    mc.play()
+                }
                 applyAudioEffects()
             }.onFailure { err ->
                 _state.update {

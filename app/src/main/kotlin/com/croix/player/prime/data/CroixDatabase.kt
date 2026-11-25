@@ -79,6 +79,12 @@ data class PlaylistTrackEntity(
     fun toTrack() = Track(trackId, title, artist, album, durationSeconds, thumbnailUrl)
 }
 
+@Entity(tableName = "recent_searches")
+data class RecentSearchEntity(
+    @PrimaryKey val query: String,
+    val searchedAtMs: Long = System.currentTimeMillis(),
+)
+
 data class ListeningStatsSummary(
     val totalPlays: Int = 0,
     val estimatedMinutes: Int = 0,
@@ -132,6 +138,18 @@ interface CroixDao {
 
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String)
+
+    @Query("SELECT * FROM recent_searches ORDER BY searchedAtMs DESC LIMIT 12")
+    fun observeRecentSearches(): Flow<List<RecentSearchEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveRecentSearch(item: RecentSearchEntity)
+
+    @Query("DELETE FROM recent_searches WHERE query = :query")
+    suspend fun deleteRecentSearch(query: String)
+
+    @Query("DELETE FROM recent_searches")
+    suspend fun clearRecentSearches()
 }
 
 @Database(
@@ -141,8 +159,9 @@ interface CroixDao {
         DownloadedTrackEntity::class,
         UserPlaylistEntity::class,
         PlaylistTrackEntity::class,
+        RecentSearchEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class CroixDatabase : RoomDatabase() {

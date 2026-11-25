@@ -72,6 +72,21 @@ enum class PrimeLyricsAlign(val label: String) {
     END("Right"),
 }
 
+@Serializable
+enum class PrimeTransitionStyle(val labelEn: String, val labelEs: String) {
+    SMOOTH_SLIDE("Smooth Slide", "Deslizamiento Suave"),
+    GENTLE_FADE("Gentle Fade", "Fundido Suave"),
+    SNAPPY_ZOOM("Snappy Zoom", "Zoom Fluido"),
+    NONE("Instant", "Sin Animación"),
+}
+
+@Serializable
+enum class PrimeLanguageMode(val labelEn: String, val labelEs: String) {
+    SYSTEM("System Auto", "Idioma del Sistema"),
+    SPANISH("Español", "Español"),
+    ENGLISH("English", "English"),
+}
+
 @Immutable
 @Serializable
 data class CroixDesignState(
@@ -123,6 +138,11 @@ data class CroixDesignState(
     val skipMusicOfftopic: Boolean = true,
     val skipSponsors: Boolean = true,
     val skipIntroOutro: Boolean = true,
+    // Transitions, Crossfade & Language
+    val transitionStyle: PrimeTransitionStyle = PrimeTransitionStyle.SMOOTH_SLIDE,
+    val transitionSpeed: Float = 1.0f,
+    val crossfadeSeconds: Int = 0,
+    val languageMode: PrimeLanguageMode = PrimeLanguageMode.SYSTEM,
 ) {
     fun clamped(): CroixDesignState = copy(
         glassOpacity = glassOpacity.coerceIn(0.05f, 0.75f),
@@ -141,6 +161,8 @@ data class CroixDesignState(
         miniPlayerHeightDp = miniPlayerHeightDp.coerceIn(56f, 84f),
         lyricsFontSizeSp = lyricsFontSizeSp.coerceIn(16f, 36f),
         lyricsBackdropBlurDp = lyricsBackdropBlurDp.coerceIn(0f, 34f),
+        transitionSpeed = transitionSpeed.coerceIn(0.5f, 2.0f),
+        crossfadeSeconds = crossfadeSeconds.coerceIn(0, 10),
     )
 
     val customPrimaryFromHue: Color get() = Color.hsv(primaryHue.coerceIn(0f, 360f), 0.78f, 1.0f)

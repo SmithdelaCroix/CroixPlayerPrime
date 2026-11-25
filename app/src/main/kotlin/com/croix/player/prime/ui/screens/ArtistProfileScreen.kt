@@ -61,6 +61,7 @@ import com.croix.prime.design.CroixAnimatedBackdrop
 import com.croix.prime.design.CroixGlassCard
 import com.croix.prime.design.LocalCroixDesign
 import com.croix.prime.design.LocalCroixPalette
+import com.croix.prime.design.LocalCroixStrings
 import com.croix.prime.engine.AlbumDetail
 import com.croix.prime.engine.AlbumSummary
 import com.croix.prime.engine.ArtistProfile
@@ -82,6 +83,7 @@ fun ArtistProfileOverlay(
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
+    val strings = LocalCroixStrings.current
     val blocker = remember { MutableInteractionSource() }
     var showAllPopular by remember { mutableStateOf(false) }
     var bioExpanded by remember { mutableStateOf(false) }
@@ -194,7 +196,7 @@ fun ArtistProfileOverlay(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 Icon(Icons.Rounded.Shuffle, null, tint = palette.primary, modifier = Modifier.size(20.dp))
-                                Text("Shuffle", color = Color.White, fontWeight = FontWeight.Bold)
+                                Text(strings.shuffle, color = Color.White, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -235,10 +237,10 @@ fun ArtistProfileOverlay(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Text("Popular", style = MaterialTheme.typography.titleLarge, color = Color.White)
+                            Text(strings.popular, style = MaterialTheme.typography.titleLarge, color = Color.White)
                             if (profile.topTracks.size > 5) {
                                 TextButton(onClick = { showAllPopular = !showAllPopular }) {
-                                    Text(if (showAllPopular) "Show less" else "See more")
+                                    Text(if (showAllPopular) strings.showLess else strings.seeMore)
                                 }
                             }
                         }
@@ -261,7 +263,7 @@ fun ArtistProfileOverlay(
                 if (profile.albums.isNotEmpty()) {
                     item {
                         DiscographyCarousel(
-                            title = "Albums",
+                            title = strings.albums,
                             items = profile.albums,
                             onOpenAlbum = onOpenAlbum,
                         )
@@ -272,7 +274,7 @@ fun ArtistProfileOverlay(
                 if (profile.singles.isNotEmpty()) {
                     item {
                         DiscographyCarousel(
-                            title = "Singles & EPs",
+                            title = strings.singlesEps,
                             items = profile.singles,
                             onOpenAlbum = onOpenAlbum,
                         )
@@ -284,7 +286,7 @@ fun ArtistProfileOverlay(
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
-                                text = "Fans also like",
+                                text = strings.fansAlsoLike,
                                 style = MaterialTheme.typography.titleLarge,
                                 color = Color.White,
                                 modifier = Modifier.padding(horizontal = 18.dp),
@@ -335,7 +337,7 @@ fun ArtistProfileOverlay(
                             modifier = Modifier.padding(horizontal = 18.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Text("About", style = MaterialTheme.typography.titleLarge, color = Color.White)
+                            Text(strings.about, style = MaterialTheme.typography.titleLarge, color = Color.White)
                             CroixGlassCard(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = { bioExpanded = !bioExpanded },
@@ -360,7 +362,7 @@ fun ArtistProfileOverlay(
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                         Text(
-                                            text = if (bioExpanded) "Show less" else "Read more",
+                                            text = if (bioExpanded) strings.showLess else strings.readMore,
                                             style = MaterialTheme.typography.labelMedium,
                                             color = palette.primary,
                                         )
@@ -520,6 +522,7 @@ fun AlbumDetailOverlay(
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
+    val strings = LocalCroixStrings.current
     val blocker = remember { MutableInteractionSource() }
 
     Box(

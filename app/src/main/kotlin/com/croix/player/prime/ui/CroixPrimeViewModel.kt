@@ -20,6 +20,7 @@ import com.croix.player.prime.data.FavoriteTrackEntity
 import com.croix.player.prime.data.HistoryTrackEntity
 import com.croix.player.prime.data.ListeningStatsSummary
 import com.croix.player.prime.data.PlaylistTrackEntity
+import com.croix.player.prime.data.RecentSearchEntity
 import com.croix.player.prime.data.UserPlaylistEntity
 import com.croix.prime.design.CroixDesignRepository
 import com.croix.prime.design.CroixDesignState
@@ -32,6 +33,7 @@ import com.croix.prime.engine.InnerTubeClient
 import com.croix.prime.engine.LrclibClient
 import com.croix.prime.engine.LyricsResult
 import com.croix.prime.engine.MoodChip
+import com.croix.prime.engine.RelatedArtist
 import com.croix.prime.engine.SponsorBlockClient
 import com.croix.prime.engine.Track
 import com.croix.prime.playback.CroixDownloadManager
@@ -48,6 +50,8 @@ import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+enum class SearchFilterTab { SONGS, ARTISTS, ALBUMS }
 
 class CroixPrimeViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application.applicationContext
@@ -71,6 +75,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         sponsorBlock = sponsorBlock,
         localFileProvider = { id -> downloadManager.getDownloadedFile(id) },
         enabledCategoriesProvider = { designState.value.enabledSponsorCategories() },
+        crossfadeSecondsProvider = { designState.value.crossfadeSeconds },
     )
 
     private val shakeDetector = CroixShakeDetector(appContext) {
@@ -139,14 +144,30 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     private val _homeLoading = MutableStateFlow(true)
     val homeLoading: StateFlow<Boolean> = _homeLoading.asStateFlow()
 
+    val recentSearches: StateFlow<List<String>> = dao.observeRecentSearches()
+        .map { rows -> rows.map { it.query } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _searchFilter = MutableStateFlow(SearchFilterTab.SONGS)
+    val searchFilter: StateFlow<SearchFilterTab> = _searchFilter.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<Track>>(emptyList())
     val searchResults: StateFlow<List<Track>> = _searchResults.asStateFlow()
 
+    private val _artistSearchResults = MutableStateFlow<List<RelatedArtist>>(emptyList())
+    val artistSearchResults: StateFlow<List<RelatedArtist>> = _artistSearchResults.asStateFlow()
+
+    private val _albumSearchResults = MutableStateFlow<List<AlbumSummary>>(emptyList())
+    val albumSearchResults: StateFlow<List<AlbumSummary>> = _albumSearchResults.asStateFlow()
+
     private val _searchLoading = MutableStateFlow(false)
     val searchLoading: StateFlow<Boolean> = _searchLoading.asStateFlow()
+
+    private val _importStatus = MutableStateFlow<String?>(null)
+    val importStatus: StateFlow<String?> = _importStatus.asStateFlow()
 
     private val _lyrics = MutableStateFlow<LyricsResult?>(null)
     val lyrics: StateFlow<LyricsResult?> = _lyrics.asStateFlow()
@@ -303,18 +324,79 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun onSearchQueryChange(q: String) {
         _searchQuery.value = q
+        triggerSearch(q, _searchFilter.value)
+    }
+
+    fun onSearchFilterChange(filter: SearchFilterTab) {
+        _searchFilter.value = filter
+        if (_searchQuery.value.isNotBlank()) {
+            triggerSearch(_searchQuery.value, filter)
+        }
+    }
+
+    private fun triggerSearch(q: String, filter: SearchFilterTab) {
         searchJob?.cancel()
         if (q.isBlank()) {
             _searchResults.value = emptyList()
+            _artistSearchResults.value = emptyList()
+            _albumSearchResults.value = emptyList()
             _searchLoading.value = false
             return
         }
         searchJob = viewModelScope.launch {
             _searchLoading.value = true
             kotlinx.coroutines.delay(350L)
-            _searchResults.value = innerTube.searchSongs(q, limit = 25)
+            val trimmed = q.trim()
+            if (trimmed.length >= 2) {
+                launch(Dispatchers.IO) { dao.saveRecentSearch(RecentSearchEntity(trimmed)) }
+            }
+            when (filter) {
+                SearchFilterTab.SONGS -> _searchResults.value = innerTube.searchSongs(trimmed, limit = 25)
+                SearchFilterTab.ARTISTS -> _artistSearchResults.value = innerTube.searchArtists(trimmed, limit = 15)
+                SearchFilterTab.ALBUMS -> _albumSearchResults.value = innerTube.searchAlbums(trimmed, limit = 15)
+            }
             _searchLoading.value = false
         }
+    }
+
+    fun deleteRecentSearch(query: String) {
+        viewModelScope.launch(Dispatchers.IO) { dao.deleteRecentSearch(query) }
+    }
+
+    fun clearRecentSearches() {
+        viewModelScope.launch(Dispatchers.IO) { dao.clearRecentSearches() }
+    }
+
+    fun importPlaylistUrl(url: String) {
+        viewModelScope.launch {
+            _importStatus.value = "..."
+            val res = innerTube.importPlaylistFromUrl(url)
+            res.onSuccess { (title, tracks) ->
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    val pid = dao.insertPlaylist(UserPlaylistEntity(name = title))
+                    tracks.forEach { t ->
+                        dao.addTrackToPlaylist(
+                            PlaylistTrackEntity(
+                                playlistId = pid,
+                                trackId = t.id,
+                                title = t.title,
+                                artist = t.artist,
+                                album = t.album,
+                                durationSeconds = t.durationSeconds,
+                                thumbnailUrl = t.thumbnailUrl,
+                            ),
+                        )
+                    }
+                }
+                _importStatus.value = "✓ $title (${tracks.size})"
+            }.onFailure { err ->
+                _importStatus.value = "✕ ${err.message ?: "Error"}"
+            }
+        }
+    }
+
+    fun clearImportStatus() {
+        _importStatus.value = null
     }
 
     fun toggleFavorite(track: Track) {

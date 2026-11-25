@@ -172,9 +172,14 @@ fun CroixPrimeTheme(
         )
     }
 
+    val strings = androidx.compose.runtime.remember(safeDesign.languageMode) {
+        resolveCroixStrings(safeDesign.languageMode)
+    }
+
     CompositionLocalProvider(
         LocalCroixDesign provides safeDesign,
         LocalCroixPalette provides resolved,
+        LocalCroixStrings provides strings,
     ) {
         MaterialTheme(
             colorScheme = m3Scheme,

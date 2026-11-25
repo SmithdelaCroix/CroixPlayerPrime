@@ -99,6 +99,31 @@ data class LyricsResult(
     val source: String = "LRCLib",
 )
 
+@Serializable
+enum class AudioQualityMode {
+    MAX_QUALITY,
+    BALANCED,
+    DATA_SAVER,
+}
+
+@Serializable
+data class DailyMix(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val accentHex: Long,
+    val secondaryHex: Long,
+    val tracks: List<Track>,
+)
+
+@Serializable
+data class HomeFeedBundle(
+    val quickPicks: List<Track> = emptyList(),
+    val dailyMixes: List<DailyMix> = emptyList(),
+    val favoriteArtists: List<RelatedArtist> = emptyList(),
+    val shelves: List<HomeSection> = emptyList(),
+)
+
 data class ResolvedStream(
     val url: String,
     val mimeType: String,
@@ -107,5 +132,15 @@ data class ResolvedStream(
     val userAgent: String = YtPlaybackClient.ANDROID_VR_NO_AUTH.userAgent,
     val origin: String? = null,
     val referer: String? = null,
+    val loudnessDb: Float? = null,
     val expiresAtEpochMs: Long = System.currentTimeMillis() + 4 * 60 * 60 * 1000L,
-)
+) {
+    val codecLabel: String
+        get() = when {
+            "opus" in mimeType.lowercase() -> "Opus"
+            "mp4a" in mimeType.lowercase() || "mp4" in mimeType.lowercase() -> "AAC/M4A"
+            else -> "Audio"
+        }
+
+    val bitrateKbps: Int get() = (bitrate / 1000).coerceAtLeast(32)
+}

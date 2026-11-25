@@ -11,23 +11,31 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 /**
- * Combines Spotify listening taste (Top Artists, Top Tracks, Recently Played, Liked Songs)
- * with YouTube Music ad-free streams & local Croix listening history to generate
- * personalized Home shelves and Flow radio mixes.
+ * Multi-signal Recommendation & Hybrid Algorithm Engine:
+ * Combines weighted local listening history (play frequency + recency decay),
+ * local favorites, Spotify listening profile (Top Artists, Top Tracks, Recently Played, Likes),
+ * and YouTube Music radio/related discovery to craft:
+ * - Selección Rápida (Quick Picks)
+ * - Mixes Diarios personalizados (Daily Mix 1, 2, 3 + Mezcla Spotify × YT)
+ * - Tus Artistas Favoritos (circulares navegables)
+ * - Estantes personalizados ("Porque escuchaste a...", "Para redescubrir")
+ * - Flow Infinito inteligente sin repeticiones.
  */
 class HybridAlgorithmEngine(
     private val innerTube: InnerTubeClient,
 ) {
-    /**
-     * Resolves a list of Spotify seed tracks onto playable YouTube Music ad-free Track entries.
-     */
+    data class WeightedPlayRecord(
+        val track: Track,
+        val playCount: Int,
+        val playedAtMs: Long,
+    )
+
     suspend fun matchSpotifyTracksToYtMusic(
         seeds: List<SpotifySeedTrack>,
         maxTracks: Int = 25,
     ): List<Track> = withContext(Dispatchers.IO) {
         val limited = seeds.take(maxTracks)
         val matched = mutableListOf<Track>()
-        // Batch in groups of 4 to avoid flooding InnerTube while keeping latency snappy
         limited.chunked(4).forEach { batch ->
             val results = coroutineScope {
                 batch.map { seed ->
@@ -44,115 +52,224 @@ class HybridAlgorithmEngine(
     }
 
     /**
-     * Builds blended Home shelves according to [blendWeight]:
-     * - 0.0f = Pure YouTube Music server recommendations
-     * - 0.5f = Balanced Hybrid (Spotify taste + YouTube Music discovery + Local history)
-     * - 1.0f = Heavy Spotify Taste Priority (Spotify top tracks & artist mixes lead the Home feed)
+     * Builds the full Deezer-style editorial HomeFeedBundle with Quick Picks, Daily Mixes,
+     * Favorite Artists, and personalized shelves.
      */
-    suspend fun buildBlendedHomeSections(
+    suspend fun buildRichHomeFeed(
         ytSections: List<HomeSection>,
         spotifyTaste: SpotifyTasteSnapshot?,
         localFavorites: List<Track>,
-        localHistory: List<Track>,
+        localHistoryRecords: List<WeightedPlayRecord>,
         blendWeight: Float,
         isSpanish: Boolean,
-    ): List<HomeSection> = withContext(Dispatchers.IO) {
+    ): HomeFeedBundle = withContext(Dispatchers.IO) {
         val weight = blendWeight.coerceIn(0f, 1f)
-        val customSections = mutableListOf<HomeSection>()
+        val now = System.currentTimeMillis()
+
+        // 1. Score local tracks & artists with recency decay (plays in last 7 days count extra)
+        val scoredTracks = localHistoryRecords.map { rec ->
+            val ageDays = ((now - rec.playedAtMs).coerceAtLeast(0L) / 86_400_000.0)
+            val recencyFactor = 1.0 / (1.0 + ageDays / 7.0)
+            val isFavBonus = if (localFavorites.any { it.id == rec.track.id }) 2.5 else 0.0
+            rec.track to (rec.playCount * (0.6 + recencyFactor) + isFavBonus)
+        }.sortedByDescending { it.second }
+
+        val topLocalTracks = (scoredTracks.map { it.first } + localFavorites).distinctBy { it.id }
+        val forgottenGems = localHistoryRecords
+            .filter { (now - it.playedAtMs) > 5L * 86_400_000L && it.playCount >= 2 }
+            .sortedByDescending { it.playCount }
+            .map { it.track }
+            .take(6)
+
+        val localArtistRankings = buildMap<String, Double> {
+            scoredTracks.forEach { (t, score) ->
+                val mainArtist = primaryArtistName(t.artist)
+                if (mainArtist.isNotBlank() && !mainArtist.equals("Unknown Artist", true)) {
+                    put(mainArtist, (get(mainArtist) ?: 0.0) + score)
+                }
+            }
+            localFavorites.forEach { t ->
+                val mainArtist = primaryArtistName(t.artist)
+                if (mainArtist.isNotBlank() && !mainArtist.equals("Unknown Artist", true)) {
+                    put(mainArtist, (get(mainArtist) ?: 0.0) + 2.0)
+                }
+            }
+        }.entries.sortedByDescending { it.value }.map { it.key }
 
         val hasSpotify = spotifyTaste != null && spotifyTaste.connected &&
             (spotifyTaste.allSeedTracks.isNotEmpty() || spotifyTaste.allSeedArtistNames.isNotEmpty())
 
-        if (hasSpotify && weight > 0.05f) {
-            val targetMixCount = (6 + (weight * 10)).toInt().coerceIn(6, 16)
-            val spotifySeeds = spotifyTaste!!.allSeedTracks.shuffled().take((targetMixCount * 0.7f).toInt().coerceAtLeast(4))
-            val matchedSpotify = matchSpotifyTracksToYtMusic(spotifySeeds, maxTracks = spotifySeeds.size)
+        // 2. Gather top seed artists combining Spotify + Local + YT Home
+        val ytFallbackArtists = ytSections.flatMap { it.tracks }
+            .map { primaryArtistName(it.artist) }
+            .filter { it.isNotBlank() && !it.equals("Unknown Artist", true) && !it.equals("YouTube Music", true) }
+            .distinct()
 
-            // Fetch YT Music related discovery from top Spotify match + local favorite
-            val radioSeed = matchedSpotify.firstOrNull() ?: localFavorites.firstOrNull() ?: localHistory.firstOrNull()
-            val ytDiscovery = if (radioSeed != null) {
-                innerTube.fetchRadioQueue(radioSeed.id, limit = 10)
-            } else {
-                emptyList()
+        val combinedArtistNames = buildList {
+            if (hasSpotify && weight > 0.1f) {
+                addAll(spotifyTaste!!.allSeedArtistNames.take(6))
             }
+            addAll(localArtistRankings.take(6))
+            addAll(ytFallbackArtists.take(6))
+        }.distinctBy { it.lowercase() }.take(8)
 
-            // Interleave Spotify tracks and YT Music discovery proportionally to blendWeight
-            val blendedMix = interleaveByWeight(
-                primary = matchedSpotify,
-                secondary = (ytDiscovery + localFavorites.shuffled().take(4)).distinctBy { it.id },
+        // 3. Run parallel discovery calls for Quick Picks, Daily Mixes & Spotify matching
+        val matchedSpotifyTracks = if (hasSpotify && weight > 0.05f) {
+            val seeds = spotifyTaste!!.allSeedTracks.shuffled().take(10)
+            matchSpotifyTracksToYtMusic(seeds, maxTracks = 10)
+        } else {
+            emptyList()
+        }
+
+        val quickPickSeedA = matchedSpotifyTracks.firstOrNull() ?: topLocalTracks.firstOrNull() ?: ytSections.firstOrNull()?.tracks?.firstOrNull()
+        val quickPickSeedB = topLocalTracks.drop(1).firstOrNull() ?: ytSections.getOrNull(1)?.tracks?.firstOrNull()
+
+        val (radioA, radioB, mixTracksByArtist) = coroutineScope {
+            val rA = async { quickPickSeedA?.let { innerTube.fetchRadioQueue(it.id, limit = 14) }.orEmpty() }
+            val rB = async { quickPickSeedB?.let { innerTube.fetchRadioQueue(it.id, limit = 10) }.orEmpty() }
+            val mixArtists = combinedArtistNames.take(3)
+            val mDefs = mixArtists.map { artist ->
+                async {
+                    val found = innerTube.searchSongs("$artist top hits", limit = 10)
+                    val extra = found.firstOrNull()?.let { innerTube.fetchRadioQueue(it.id, limit = 8) }.orEmpty()
+                    artist to (found + extra).distinctBy { it.id }.take(15)
+                }
+            }
+            Triple(rA.await(), rB.await(), mDefs.awaitAll())
+        }
+
+        // 4. Build Quick Picks (16 dense high-affinity tracks for 4-row horizontal pager)
+        val quickPicks = interleaveByWeight(
+            primary = (matchedSpotifyTracks + forgottenGems + topLocalTracks.take(4)).distinctBy { it.id },
+            secondary = (radioA + radioB + ytSections.firstOrNull()?.tracks.orEmpty()).distinctBy { it.id },
+            primaryWeight = if (hasSpotify) weight.coerceIn(0.3f, 0.85f) else 0.4f,
+            limit = 16,
+        )
+
+        // 5. Build Editorial Daily Mixes (Deezer "Made For You" poster cards!)
+        val mixGradients = listOf(
+            0xFFA238FFL to 0xFFFF2E93L,
+            0xFF00E5FFL to 0xFF3D5AFEL,
+            0xFFFF6D00L to 0xFFFF1744L,
+            0xFF1DB954L to 0xFF00BFA5L,
+        )
+        val dailyMixes = mutableListOf<DailyMix>()
+
+        if (hasSpotify && matchedSpotifyTracks.isNotEmpty()) {
+            val pct = (weight * 100).toInt()
+            val hybridTracks = interleaveByWeight(
+                primary = matchedSpotifyTracks,
+                secondary = (radioA + topLocalTracks.take(5)).distinctBy { it.id },
                 primaryWeight = weight,
                 limit = 16,
             )
+            val topNames = spotifyTaste!!.allSeedArtistNames.take(3).joinToString(", ")
+            dailyMixes += DailyMix(
+                id = "mix_spotify_hybrid",
+                title = if (isSpanish) "Mix Híbrido Spotify $pct%" else "Spotify $pct% Hybrid Mix",
+                subtitle = topNames.ifBlank { if (isSpanish) "Tu algoritmo combinado" else "Your blended taste" },
+                accentHex = 0xFF1DB954L,
+                secondaryHex = 0xFFA238FFL,
+                tracks = hybridTracks,
+            )
+        }
 
-            if (blendedMix.isNotEmpty()) {
-                val pct = (weight * 100).toInt()
-                val title = if (isSpanish) {
-                    "Mezcla Híbrida • Spotify $pct% × YT"
-                } else {
-                    "Hybrid Mix • Spotify $pct% × YT"
-                }
-                customSections += HomeSection(title = title, tracks = blendedMix)
-            }
-
-            // Artist-driven shelf inspired by top Spotify artists
-            val pickedArtists = spotifyTaste.allSeedArtistNames.shuffled().take(2)
-            if (pickedArtists.isNotEmpty()) {
-                val artistTracks = coroutineScope {
-                    pickedArtists.map { artist ->
-                        async { innerTube.searchSongs("$artist top songs", limit = 6) }
-                    }.awaitAll().flatten().distinctBy { it.id }.shuffled().take(12)
-                }
-                if (artistTracks.isNotEmpty()) {
-                    val label = pickedArtists.joinToString(" & ")
-                    val title = if (isSpanish) {
-                        "Por tu algoritmo de Spotify • $label"
-                    } else {
-                        "From your Spotify taste • $label"
-                    }
-                    customSections += HomeSection(title = title, tracks = artistTracks)
-                }
-            }
-        } else if (localFavorites.isNotEmpty() || localHistory.isNotEmpty()) {
-            val seed = (localFavorites + localHistory).shuffled().firstOrNull()
-            if (seed != null) {
-                val radio = innerTube.fetchRadioQueue(seed.id, limit = 12)
-                if (radio.isNotEmpty()) {
-                    val title = if (isSpanish) "Recomendado para ti • ${seed.artist}" else "Picked for you • ${seed.artist}"
-                    customSections += HomeSection(title = title, tracks = radio)
-                }
+        mixTracksByArtist.forEachIndexed { idx, (artist, tracks) ->
+            if (tracks.size >= 4) {
+                val (c1, c2) = mixGradients[idx % mixGradients.size]
+                val relatedNames = tracks.map { primaryArtistName(it.artist) }
+                    .distinctBy { it.lowercase() }
+                    .take(3)
+                    .joinToString(", ")
+                dailyMixes += DailyMix(
+                    id = "daily_mix_${idx + 1}",
+                    title = if (isSpanish) "Mix Diario ${idx + 1}" else "Daily Mix ${idx + 1}",
+                    subtitle = relatedNames.ifBlank { artist },
+                    accentHex = c1,
+                    secondaryHex = c2,
+                    tracks = tracks,
+                )
             }
         }
 
-        if (customSections.isEmpty()) return@withContext ytSections
+        if (forgottenGems.size >= 3) {
+            dailyMixes += DailyMix(
+                id = "mix_rediscover",
+                title = if (isSpanish) "Para Redescubrir" else "Rediscover Mix",
+                subtitle = if (isSpanish) "Favoritas que hace días no escuchas" else "Favorites you haven't played lately",
+                accentHex = 0xFFFF4081L,
+                secondaryHex = 0xFF7C4DFFL,
+                tracks = (forgottenGems + radioB).distinctBy { it.id }.take(15),
+            )
+        }
 
-        // Order sections based on blend weight: high Spotify weight puts hybrid shelves on top;
-        // moderate weight puts the Hybrid Mix first, then interleaves YT Music shelves.
-        if (weight >= 0.65f) {
-            customSections + ytSections
-        } else {
-            buildList {
-                add(customSections.first())
-                ytSections.firstOrNull()?.let { add(it) }
-                customSections.drop(1).forEach { add(it) }
-                ytSections.drop(1).forEach { add(it) }
+        // 6. Build Favorite Artists circular row (using Spotify avatars or track thumbnails)
+        val thumbByArtist = mutableMapOf<String, String>()
+        spotifyTaste?.topArtists?.forEach { a ->
+            if (a.thumbnailUrl.isNotBlank()) thumbByArtist[a.name.lowercase()] = a.thumbnailUrl
+        }
+        (topLocalTracks + ytSections.flatMap { it.tracks }).forEach { t ->
+            val key = primaryArtistName(t.artist).lowercase()
+            if (key.isNotBlank() && !thumbByArtist.containsKey(key) && t.thumbnailUrl.isNotBlank()) {
+                thumbByArtist[key] = t.thumbnailUrl
             }
         }
+        val favoriteArtists = combinedArtistNames.map { name ->
+            RelatedArtist(
+                browseId = "",
+                name = name,
+                subscribers = "",
+                thumbnailUrl = thumbByArtist[name.lowercase()].orEmpty(),
+            )
+        }
+
+        // 7. Build Personalized Shelves + Clean YT Music Shelves
+        val personalizedShelves = mutableListOf<HomeSection>()
+        mixTracksByArtist.firstOrNull()?.let { (artist, tracks) ->
+            if (tracks.isNotEmpty()) {
+                personalizedShelves += HomeSection(
+                    title = if (isSpanish) "Porque escuchaste a $artist" else "Because you listen to $artist",
+                    tracks = tracks,
+                )
+            }
+        }
+        if (hasSpotify && matchedSpotifyTracks.isNotEmpty()) {
+            personalizedShelves += HomeSection(
+                title = if (isSpanish) "De tu perfil de Spotify" else "From your Spotify profile",
+                tracks = matchedSpotifyTracks,
+            )
+        }
+
+        val finalShelves = (personalizedShelves + ytSections).distinctBy { it.title }
+        HomeFeedBundle(
+            quickPicks = quickPicks,
+            dailyMixes = dailyMixes,
+            favoriteArtists = favoriteArtists,
+            shelves = finalShelves,
+        )
     }
 
-    /**
-     * Generates a fresh Flow radio queue blending Spotify taste, local likes, and YT Music radio.
-     */
     suspend fun buildHybridFlowQueue(
         spotifyTaste: SpotifyTasteSnapshot?,
         localFavorites: List<Track>,
         localHistory: List<Track>,
         fallbackTracks: List<Track>,
         blendWeight: Float,
+        moodQuery: String? = null,
+        excludeIds: Set<String> = emptySet(),
     ): List<Track> = withContext(Dispatchers.IO) {
+        if (!moodQuery.isNullOrBlank()) {
+            val moodTracks = innerTube.searchSongs(moodQuery, limit = 18)
+                .filter { it.id !in excludeIds }
+            val extra = moodTracks.firstOrNull()?.let { innerTube.fetchRadioQueue(it.id, limit = 12) }.orEmpty()
+                .filter { it.id !in excludeIds }
+            return@withContext (moodTracks + extra).distinctBy { it.id }.take(25)
+        }
+
         val weight = blendWeight.coerceIn(0f, 1f)
         val spotifyMatched = if (spotifyTaste != null && spotifyTaste.connected && weight > 0.1f) {
-            val seeds = spotifyTaste.allSeedTracks.shuffled().take(5)
-            matchSpotifyTracksToYtMusic(seeds, maxTracks = 5)
+            val seeds = spotifyTaste.allSeedTracks.shuffled().take(6)
+            matchSpotifyTracksToYtMusic(seeds, maxTracks = 6)
         } else {
             emptyList()
         }
@@ -163,23 +280,26 @@ class HybridAlgorithmEngine(
             ?: fallbackTracks.firstOrNull()
 
         val radio = if (anchor != null) {
-            innerTube.fetchRadioQueue(anchor.id, limit = 18)
+            innerTube.fetchRadioQueue(anchor.id, limit = 20)
         } else {
-            innerTube.searchSongs("top global music hits", limit = 15)
+            innerTube.searchSongs("top global music hits", limit = 18)
         }
 
         interleaveByWeight(
-            primary = spotifyMatched,
-            secondary = (radio + localFavorites.shuffled().take(5)).distinctBy { it.id },
+            primary = spotifyMatched.filter { it.id !in excludeIds },
+            secondary = (radio + localFavorites.shuffled().take(6)).filter { it.id !in excludeIds }.distinctBy { it.id },
             primaryWeight = weight.coerceAtLeast(0.35f),
-            limit = 22,
+            limit = 25,
         )
     }
+
+    private fun primaryArtistName(raw: String): String =
+        raw.split(",", "&", "feat.", "ft.", ignoreCase = true).firstOrNull()?.trim().orEmpty()
 
     internal fun pickBestMatch(seed: SpotifySeedTrack, candidates: List<Track>): Track? {
         if (candidates.isEmpty()) return null
         val seedTitle = seed.title.lowercase()
-        val seedArtist = seed.artist.split(",", "&").firstOrNull()?.trim()?.lowercase().orEmpty()
+        val seedArtist = primaryArtistName(seed.artist).lowercase()
         return candidates.maxByOrNull { c ->
             var score = 0
             val cTitle = c.title.lowercase()

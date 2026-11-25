@@ -19,57 +19,57 @@ import kotlinx.serialization.json.Json
 
 @Serializable
 enum class PrimeColorMode(val label: String) {
-    VIOLET_GLASS("Violet Glass"),
-    NEON_CYAN("Neon Cyan"),
-    ALBUM_MORPH("Album Morph"),
+    VIOLET_GLASS("Cristal Violeta"),
+    NEON_CYAN("Neón Cian"),
+    ALBUM_MORPH("Carátula Viva"),
     DYNAMIC_SYSTEM("Material You"),
-    AMOLED_BLACK("AMOLED Black"),
-    CUSTOM_GRADIENT("Custom Gradient"),
+    AMOLED_BLACK("AMOLED Negro"),
+    CUSTOM_GRADIENT("Color Libre"),
 }
 
 @Serializable
 enum class PrimePlayerStyle(val label: String) {
-    TRANSLUCENT_CARD("Translucent Card"),
-    FROSTED_GLASS("Frosted Glass"),
-    FULLSCREEN_COVER("Fullscreen Cover"),
-    MINIMAL_CLEAN("Minimal Clean"),
+    TRANSLUCENT_CARD("Tarjeta Cristal"),
+    FROSTED_GLASS("Cristal Escarchado"),
+    FULLSCREEN_COVER("Carátula Grande"),
+    MINIMAL_CLEAN("Minimalista"),
 }
 
 @Serializable
 enum class PrimeProgressStyle(val label: String) {
-    WAVEFORM("Waveform"),
-    CAPSULE("Capsule"),
-    THIN_LINE("Thin Line"),
-    SQUIGGLY("Squiggly"),
+    WAVEFORM("Onda"),
+    CAPSULE("Cápsula"),
+    THIN_LINE("Línea Fina"),
+    SQUIGGLY("Ondulada"),
 }
 
 @Serializable
 enum class PrimeVisualizerStyle(val label: String) {
-    OFF("Off"),
-    SPECTRUM_BARS("Spectrum Bars"),
-    PULSE_WAVE("Pulse Wave"),
-    ORBIT_RINGS("Orbit Rings"),
+    OFF("Apagado"),
+    SPECTRUM_BARS("Barras Espectro"),
+    PULSE_WAVE("Onda Pulso"),
+    ORBIT_RINGS("Anillos Órbita"),
 }
 
 @Serializable
 enum class PrimeNavBarStyle(val label: String) {
-    FLOATING_GLASS_PILL("Floating Pill"),
-    DOCKED_TRANSLUCENT("Docked Glass"),
-    COMPACT_ICONS("Compact Icons"),
+    FLOATING_GLASS_PILL("Píldora Flotante"),
+    DOCKED_TRANSLUCENT("Barra Acoplada"),
+    COMPACT_ICONS("Iconos Compactos"),
 }
 
 @Serializable
 enum class PrimeCardDensity(val label: String) {
-    COMPACT("Compact"),
+    COMPACT("Compacto"),
     EDITORIAL("Editorial"),
-    SPACIOUS("Spacious"),
+    SPACIOUS("Amplio"),
 }
 
 @Serializable
 enum class PrimeLyricsAlign(val label: String) {
-    START("Left"),
-    CENTER("Center"),
-    END("Right"),
+    START("Izquierda"),
+    CENTER("Centro"),
+    END("Derecha"),
 }
 
 @Serializable
@@ -82,35 +82,49 @@ enum class PrimeTransitionStyle(val labelEn: String, val labelEs: String) {
 
 @Serializable
 enum class PrimeLanguageMode(val labelEn: String, val labelEs: String) {
-    SYSTEM("System Auto", "Idioma del Sistema"),
     SPANISH("Español", "Español"),
-    ENGLISH("English", "English"),
+    SYSTEM("System Auto", "Automático del Sistema"),
+    ENGLISH("English", "Inglés"),
+}
+
+@Serializable
+enum class PrimeAudioQuality(val labelEs: String, val labelEn: String) {
+    MAX_QUALITY("Máxima (Opus/AAC)", "Maximum (Opus/AAC)"),
+    BALANCED("Balanceada (128 kbps)", "Balanced (128 kbps)"),
+    DATA_SAVER("Ahorro de Datos", "Data Saver"),
 }
 
 @Immutable
 @Serializable
 data class CroixDesignState(
-    val presetName: String = "Prime Violet Glass",
+    val presetName: String = "Cristal Violeta",
     // Glassmorphism translucency controls (applied across the ENTIRE app)
     val glassOpacity: Float = 0.16f,
     val glassBlurDp: Float = 22f,
     val borderGlowAlpha: Float = 0.24f,
     val borderWidthDp: Float = 1.0f,
     val cornerRadiusDp: Float = 22f,
-    val ambientGlowStrength: Float = 0.48f,
+    val ambientGlowStrength: Float = 0.50f,
     val backdropMotionEnabled: Boolean = true,
     val backdropMotionSpeed: Float = 1.0f,
-    // Free Gradient & Color Engine
+    val fontScale: Float = 1.0f,
+    // Deep Dynamic Color & Gradient Engine
     val colorMode: PrimeColorMode = PrimeColorMode.VIOLET_GLASS,
     val useGradientStyle: Boolean = true,
     val customAccentArgb: Long = 0xFFA238FF,
     val secondaryAccentArgb: Long = 0xFFFF2E93,
     val primaryHue: Float = 272f,
     val secondaryHue: Float = 330f,
-    // Home Screen customization
+    val primarySaturation: Float = 0.80f,
+    val secondarySaturation: Float = 0.84f,
+    val pureBlackBackground: Boolean = false,
+    // Home Screen Editorial Customization
     val showCroixFlowHero: Boolean = true,
     val showMoodChips: Boolean = true,
     val showQuickResumeGrid: Boolean = true,
+    val showDailyMixes: Boolean = true,
+    val showQuickPicks: Boolean = true,
+    val showFavoriteArtistsRow: Boolean = true,
     val cardDensity: PrimeCardDensity = PrimeCardDensity.EDITORIAL,
     // Now Playing & Visualizer
     val playerStyle: PrimePlayerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
@@ -119,6 +133,10 @@ data class CroixDesignState(
     val artworkCornerDp: Float = 24f,
     val vinylSpinEnabled: Boolean = false,
     val playerControlDockOpacity: Float = 0.22f,
+    // Playback & Audio Quality
+    val audioQuality: PrimeAudioQuality = PrimeAudioQuality.MAX_QUALITY,
+    val normalizeAudio: Boolean = true,
+    val autoPlayRelated: Boolean = true,
     // Gestures & Hardware
     val swipeArtworkToSkip: Boolean = true,
     val doubleTapSeekSeconds: Int = 10,
@@ -138,11 +156,11 @@ data class CroixDesignState(
     val skipMusicOfftopic: Boolean = true,
     val skipSponsors: Boolean = true,
     val skipIntroOutro: Boolean = true,
-    // Transitions, Crossfade & Language
+    // Transitions, Crossfade & Language (Default 100% Spanish!)
     val transitionStyle: PrimeTransitionStyle = PrimeTransitionStyle.SMOOTH_SLIDE,
     val transitionSpeed: Float = 1.0f,
     val crossfadeSeconds: Int = 0,
-    val languageMode: PrimeLanguageMode = PrimeLanguageMode.SYSTEM,
+    val languageMode: PrimeLanguageMode = PrimeLanguageMode.SPANISH,
 ) {
     fun clamped(): CroixDesignState = copy(
         glassOpacity = glassOpacity.coerceIn(0.05f, 0.75f),
@@ -152,8 +170,11 @@ data class CroixDesignState(
         cornerRadiusDp = cornerRadiusDp.coerceIn(8f, 32f),
         ambientGlowStrength = ambientGlowStrength.coerceIn(0f, 0.9f),
         backdropMotionSpeed = backdropMotionSpeed.coerceIn(0.2f, 2.5f),
+        fontScale = fontScale.coerceIn(0.85f, 1.20f),
         primaryHue = primaryHue.coerceIn(0f, 360f),
         secondaryHue = secondaryHue.coerceIn(0f, 360f),
+        primarySaturation = primarySaturation.coerceIn(0.25f, 1.0f),
+        secondarySaturation = secondarySaturation.coerceIn(0.25f, 1.0f),
         artworkCornerDp = artworkCornerDp.coerceIn(0f, 36f),
         playerControlDockOpacity = playerControlDockOpacity.coerceIn(0.05f, 0.80f),
         doubleTapSeekSeconds = doubleTapSeekSeconds.coerceIn(5, 30),
@@ -165,8 +186,10 @@ data class CroixDesignState(
         crossfadeSeconds = crossfadeSeconds.coerceIn(0, 10),
     )
 
-    val customPrimaryFromHue: Color get() = Color.hsv(primaryHue.coerceIn(0f, 360f), 0.78f, 1.0f)
-    val customSecondaryFromHue: Color get() = Color.hsv(secondaryHue.coerceIn(0f, 360f), 0.82f, 1.0f)
+    val customPrimaryFromHue: Color
+        get() = Color.hsv(primaryHue.coerceIn(0f, 360f), primarySaturation.coerceIn(0.25f, 1f), 1.0f)
+    val customSecondaryFromHue: Color
+        get() = Color.hsv(secondaryHue.coerceIn(0f, 360f), secondarySaturation.coerceIn(0.25f, 1f), 1.0f)
 
     fun enabledSponsorCategories(): Set<String> = buildSet {
         if (!sponsorBlockEnabled) return@buildSet
@@ -185,7 +208,7 @@ data class CroixDesignState(
 
 object PrimePresets {
     val PrimeVioletGlass = CroixDesignState(
-        presetName = "Prime Violet Glass",
+        presetName = "Cristal Violeta",
         glassOpacity = 0.16f,
         glassBlurDp = 22f,
         borderGlowAlpha = 0.26f,
@@ -199,8 +222,8 @@ object PrimePresets {
     )
 
     val FrostedNeonCyan = CroixDesignState(
-        presetName = "Frosted Neon Cyan",
-        glassOpacity = 0.22f,
+        presetName = "Neón Cian",
+        glassOpacity = 0.20f,
         glassBlurDp = 28f,
         borderGlowAlpha = 0.34f,
         borderWidthDp = 1.2f,
@@ -214,7 +237,7 @@ object PrimePresets {
     )
 
     val AlbumMorphLive = CroixDesignState(
-        presetName = "Album Morph Live",
+        presetName = "Carátula Viva",
         glassOpacity = 0.18f,
         glassBlurDp = 26f,
         borderGlowAlpha = 0.28f,
@@ -226,13 +249,60 @@ object PrimePresets {
         lyricsAlign = PrimeLyricsAlign.CENTER,
     )
 
+    val SunsetCoral = CroixDesignState(
+        presetName = "Atardecer Coral",
+        glassOpacity = 0.18f,
+        glassBlurDp = 24f,
+        borderGlowAlpha = 0.30f,
+        ambientGlowStrength = 0.58f,
+        colorMode = PrimeColorMode.CUSTOM_GRADIENT,
+        primaryHue = 16f,
+        secondaryHue = 338f,
+        primarySaturation = 0.88f,
+        secondarySaturation = 0.85f,
+        playerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
+        progressStyle = PrimeProgressStyle.WAVEFORM,
+    )
+
+    val DeepEmerald = CroixDesignState(
+        presetName = "Esmeralda Profunda",
+        glassOpacity = 0.17f,
+        glassBlurDp = 22f,
+        borderGlowAlpha = 0.28f,
+        ambientGlowStrength = 0.54f,
+        colorMode = PrimeColorMode.CUSTOM_GRADIENT,
+        primaryHue = 148f,
+        secondaryHue = 192f,
+        primarySaturation = 0.85f,
+        secondarySaturation = 0.82f,
+        playerStyle = PrimePlayerStyle.FROSTED_GLASS,
+        progressStyle = PrimeProgressStyle.CAPSULE,
+    )
+
+    val MidnightGold = CroixDesignState(
+        presetName = "Oro Nocturno",
+        glassOpacity = 0.14f,
+        glassBlurDp = 18f,
+        borderGlowAlpha = 0.32f,
+        ambientGlowStrength = 0.44f,
+        pureBlackBackground = true,
+        colorMode = PrimeColorMode.CUSTOM_GRADIENT,
+        primaryHue = 42f,
+        secondaryHue = 22f,
+        primarySaturation = 0.90f,
+        secondarySaturation = 0.82f,
+        playerStyle = PrimePlayerStyle.MINIMAL_CLEAN,
+        progressStyle = PrimeProgressStyle.THIN_LINE,
+    )
+
     val AmoledObsidian = CroixDesignState(
-        presetName = "AMOLED Obsidian",
+        presetName = "Obsidiana AMOLED",
         glassOpacity = 0.08f,
         glassBlurDp = 10f,
-        borderGlowAlpha = 0.14f,
+        borderGlowAlpha = 0.16f,
         ambientGlowStrength = 0.12f,
         backdropMotionEnabled = false,
+        pureBlackBackground = true,
         cornerRadiusDp = 16f,
         colorMode = PrimeColorMode.AMOLED_BLACK,
         playerStyle = PrimePlayerStyle.MINIMAL_CLEAN,
@@ -242,7 +312,7 @@ object PrimePresets {
     )
 
     val DynamicGlass = CroixDesignState(
-        presetName = "Dynamic Glass",
+        presetName = "Cristal Dinámico",
         glassOpacity = 0.20f,
         glassBlurDp = 20f,
         borderGlowAlpha = 0.22f,
@@ -255,6 +325,9 @@ object PrimePresets {
         PrimeVioletGlass,
         FrostedNeonCyan,
         AlbumMorphLive,
+        SunsetCoral,
+        DeepEmerald,
+        MidnightGold,
         AmoledObsidian,
         DynamicGlass,
     )
@@ -262,43 +335,40 @@ object PrimePresets {
 
 object CroixThemeJson {
     private val json = Json {
-        ignoreUnknownKeys = true
         prettyPrint = true
+        ignoreUnknownKeys = true
         encodeDefaults = true
+        isLenient = true
     }
 
-    fun export(state: CroixDesignState): String =
-        json.encodeToString(CroixDesignState.serializer(), state.clamped())
+    fun export(state: CroixDesignState): String = json.encodeToString(CroixDesignState.serializer(), state.clamped())
 
     fun import(raw: String): Result<CroixDesignState> = runCatching {
-        json.decodeFromString(CroixDesignState.serializer(), raw).clamped()
+        json.decodeFromString(CroixDesignState.serializer(), raw.trim()).clamped()
     }
 }
 
-private val Context.croixDesignStore: DataStore<Preferences> by preferencesDataStore(
-    name = "croix_prime_design_store",
-)
+private val Context.croixDesignDataStore: DataStore<Preferences> by preferencesDataStore(name = "croix_prime_design")
 
 class CroixDesignRepository(private val context: Context) {
-    private val key = stringPreferencesKey("croix_prime_design_json")
+    private val key = stringPreferencesKey("design_state_v1")
 
-    val designFlow: Flow<CroixDesignState> = context.croixDesignStore.data.map { prefs ->
-        val raw = prefs[key]
-        if (raw.isNullOrBlank()) PrimePresets.PrimeVioletGlass
-        else CroixThemeJson.import(raw).getOrDefault(PrimePresets.PrimeVioletGlass)
+    val designFlow: Flow<CroixDesignState> = context.croixDesignDataStore.data.map { prefs ->
+        val raw = prefs[key] ?: return@map PrimePresets.PrimeVioletGlass
+        CroixThemeJson.import(raw).getOrElse { PrimePresets.PrimeVioletGlass }
     }
 
     suspend fun update(transform: (CroixDesignState) -> CroixDesignState) {
-        context.croixDesignStore.edit { prefs ->
-            val current = prefs[key]?.let { CroixThemeJson.import(it).getOrNull() }
-                ?: PrimePresets.PrimeVioletGlass
-            prefs[key] = CroixThemeJson.export(transform(current).clamped())
+        context.croixDesignDataStore.edit { prefs ->
+            val current = prefs[key]?.let { CroixThemeJson.import(it).getOrNull() } ?: PrimePresets.PrimeVioletGlass
+            val updated = transform(current).clamped()
+            prefs[key] = CroixThemeJson.export(updated)
         }
     }
 
     suspend fun applyPreset(preset: CroixDesignState) {
-        context.croixDesignStore.edit { prefs ->
-            prefs[key] = CroixThemeJson.export(preset.clamped())
+        context.croixDesignDataStore.edit { prefs ->
+            prefs[key] = CroixThemeJson.export(preset)
         }
     }
 }

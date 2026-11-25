@@ -42,18 +42,19 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 enum class EqPreset(val label: String, val bandsDb: List<Float>) {
-    FLAT("Flat", listOf(0f, 0f, 0f, 0f, 0f)),
-    BASS_BOOST("Bass Boost", listOf(7f, 4f, 0f, 1f, 2f)),
+    FLAT("Plano", listOf(0f, 0f, 0f, 0f, 0f)),
+    BASS_BOOST("Graves+", listOf(7f, 4f, 0f, 1f, 2f)),
     ROCK("Rock", listOf(5f, 2f, -1f, 3f, 5f)),
     POP("Pop", listOf(-1f, 3f, 5f, 3f, -1f)),
     VOCAL("Vocal", listOf(-2f, 1f, 5f, 4f, 1f)),
-    ELECTRONIC("Electronic", listOf(6f, 3f, 0f, 3f, 6f)),
-    CUSTOM("Custom", listOf(0f, 0f, 0f, 0f, 0f)),
+    ELECTRONIC("Electrónica", listOf(6f, 3f, 0f, 3f, 6f)),
+    CUSTOM("Personalizado", listOf(0f, 0f, 0f, 0f, 0f)),
 }
 
 data class PlaybackUiState(
     val currentTrack: Track? = null,
     val isPlayingOfflineFile: Boolean = false,
+    val activeStreamInfo: String = "",
     val queue: List<Track> = emptyList(),
     val currentIndex: Int = -1,
     val isPlaying: Boolean = false,
@@ -82,6 +83,8 @@ class CroixPlayerController(
     private val localFileProvider: (String) -> File?,
     private val enabledCategoriesProvider: () -> Set<String>,
     private val crossfadeSecondsProvider: () -> Int = { 0 },
+    private val normalizeAudioProvider: () -> Boolean = { true },
+    private val autoPlayRelatedProvider: () -> Boolean = { true },
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -332,13 +335,15 @@ class CroixPlayerController(
 
             val offlineFile = localFileProvider(track.id)
             val resolvedResult: Result<Pair<Uri, ResolvedStream?>> = if (offlineFile != null) {
-                _state.update { it.copy(isPlayingOfflineFile = true) }
+                _state.update { it.copy(isPlayingOfflineFile = true, activeStreamInfo = "Offline • M4A") }
                 activeClientKey = "OFFLINE"
                 Result.success(Uri.fromFile(offlineFile) to null)
             } else {
-                _state.update { it.copy(isPlayingOfflineFile = false) }
+                _state.update { it.copy(isPlayingOfflineFile = false, activeStreamInfo = "") }
                 innerTube.resolveAudioStream(track.id, bypassCache = bypassCache).map { stream ->
                     activeClientKey = stream.clientKey
+                    val info = "${stream.codecLabel} • ${stream.bitrateKbps} kbps"
+                    _state.update { it.copy(activeStreamInfo = info) }
                     CroixAudioSessionBridge.registerStreamHeaders(
                         stream.url,
                         StreamRequestHeaders(
@@ -352,11 +357,11 @@ class CroixPlayerController(
                 }
             }
 
-            resolvedResult.onSuccess { (mediaUri, _) ->
+            resolvedResult.onSuccess { (mediaUri, resolvedStream) ->
                 val mc = controller ?: runCatching { controllerReady.await() }.getOrNull()
                 if (mc == null) {
                     _state.update {
-                        it.copy(isBuffering = false, errorMessage = "Audio service unavailable")
+                        it.copy(isBuffering = false, errorMessage = "Servicio de audio no disponible")
                     }
                     return@onSuccess
                 }
@@ -375,6 +380,16 @@ class CroixPlayerController(
                 mc.setPlaybackParameters(PlaybackParameters(_state.value.playbackSpeed, _state.value.playbackPitch))
                 CroixAudioSessionBridge.exoPlayerRef?.skipSilenceEnabled = _state.value.skipSilenceEnabled
                 mc.prepare()
+
+                // Target normalized volume from YouTube loudnessDb metadata when enabled
+                val targetVol = if (normalizeAudioProvider() && resolvedStream?.loudnessDb != null) {
+                    val db = resolvedStream.loudnessDb!!.coerceIn(-12f, 12f)
+                    val gain = Math.pow(10.0, (-db / 20.0)).toFloat()
+                    gain.coerceIn(0.45f, 1.0f)
+                } else {
+                    1.0f
+                }
+
                 val cfSec = crossfadeSecondsProvider().coerceIn(0, 10)
                 if (cfSec > 0 && crossfadeTriggeredForTrackId != null) {
                     crossfadeTriggeredForTrackId = null
@@ -384,21 +399,41 @@ class CroixPlayerController(
                         val steps = (cfSec * 5).coerceIn(5, 25)
                         for (i in 1..steps) {
                             delay(100L)
-                            mc.volume = (i.toFloat() / steps.toFloat()).coerceIn(0.08f, 1f)
+                            mc.volume = ((i.toFloat() / steps.toFloat()) * targetVol).coerceIn(0.08f, targetVol)
                         }
-                        mc.volume = 1f
+                        mc.volume = targetVol
                     }
                 } else {
-                    mc.volume = 1f
+                    mc.volume = targetVol
                     mc.play()
                 }
                 applyAudioEffects()
+
+                // Lookahead prefetch for the NEXT track so skipping / auto-advancing is instant!
+                launch(Dispatchers.IO) {
+                    val q = _state.value.queue
+                    val nextIdx = _state.value.currentIndex + 1
+                    val nextTrack = q.getOrNull(nextIdx)
+                    if (nextTrack != null && localFileProvider(nextTrack.id) == null) {
+                        innerTube.prefetchAudioStream(nextTrack.id)
+                    }
+                    // Smart Autoplay: keep queue alive when approaching the last 2 tracks
+                    if (autoPlayRelatedProvider() && q.size - nextIdx <= 2) {
+                        val more = innerTube.fetchRadioQueue(track.id, limit = 12)
+                        if (more.isNotEmpty()) {
+                            _state.update { cur ->
+                                val seen = cur.queue.map { it.id }.toSet()
+                                cur.copy(queue = cur.queue + more.filter { it.id !in seen })
+                            }
+                        }
+                    }
+                }
             }.onFailure { err ->
                 _state.update {
                     it.copy(
                         isPlaying = false,
                         isBuffering = false,
-                        errorMessage = err.message ?: "Could not resolve audio stream",
+                        errorMessage = err.message ?: "No se pudo resolver el audio",
                     )
                 }
             }

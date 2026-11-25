@@ -1,16 +1,19 @@
-# Croix Player Prime
+# Croix Player Prime (`v3.0.0-prime`)
 
-Reproductor de música Android 12+ (`arm64-v8a` — ARMv8 / ARMv9) construido desde cero con estética Glassmorphism translúcida a 120fps, motor de reproducción YouTube Music estilo Metrolist sin anuncios, SponsorBlock, letras sincronizadas LRCLib y sincronización/algoritmo híbrido con Spotify.
+Reproductor de música Android 12+ (`arm64-v8a` — ARMv8 / ARMv9) construido desde cero en español, con estética editorial + Glassmorphism translúcido a 120fps, motor de reproducción multi-cliente sin anuncios, precarga instantánea, algoritmo híbrido con Spotify y firma digital permanente para actualizaciones directas sin conflicto de paquetes.
 
-## Descargar APK Directo (`v2.6.0-prime` — ARM64 Firmado)
+## Descargar APK Directo (`v3.0.0-prime` — ARM64 Firma Permanente)
 
 - **Descarga directa (Último APK firmado, sin ZIP)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/latest-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
 - **Todas las versiones (GitHub Releases)**: https://github.com/SmithdelaCroix/CroixPlayerPrime/releases
 
-## Novedades (`v2.6.0-prime`)
-- **Motor de Reproducción YouTube Music estilo Metrolist**: Cadena completa de clientes 2026 (`VISIONOS`, `ANDROID_VR`, `IOS`, `IOS_MUSIC`, `IPADOS`, `ANDROID_MUSIC`, `MOBILE`, `ANDROID_CREATOR`, `TVHTML5`, `WEB_REMIX`), `visitorData`, deobfuscación `?n=` / `signatureCipher`, validación HTTP `Range: bytes=0-1` antes de reproducir, headers dinámicos por cliente en ExoPlayer y recuperación automática en caso de error.
-- **Sincronización y Algoritmo de Spotify estilo Yuma**: Login WebView con soporte de ventanas emergentes OAuth (Google / Apple / Facebook) + pegado directo de `sp_dc`, auto-descubrimiento en vivo de hashes GraphQL de Spotify, mezcla configurable `0%–100%` en Inicio y Flow, e importación directa de playlists de Spotify.
-- **Servidores YouTube Music + Ad-Block estricto**: Conexión Directa Sin Anuncios, Relay Piped o Servidor Personalizado, ping de latencia en vivo y contador de anuncios/patrocinios bloqueados.
+> **Nota al actualizar por primera vez a `v3.0.0-prime`**: A partir de esta versión se utiliza una **clave de firma RSA-4096 permanente**. Si tienes instalada una versión anterior (`v2.x`), desinstálala **una sola vez** antes de instalar `v3.0.0-prime`; a partir de ahí todas las futuras actualizaciones se instalarán directamente encima sin conflicto de paquetes ni pérdida de datos.
+
+## Novedades (`v3.0.0-prime`)
+- **Motor de Reproducción Turbo**: Cadena completa de 13 clientes YouTube 2026 (`VISIONOS`, `ANDROID_VR`, `IOS`, `IOS_MUSIC`, `ANDROID_MUSIC`, etc.), **precarga anticipada de la siguiente canción**, buffers de inicio rápido (`1s`), normalización automática de volumen (`loudnessDb`), calidad de audio seleccionable (*Máxima / Balanceada / Ahorro*), Autoplay inteligente y recuperación automática.
+- **Algoritmo de Recomendaciones Renovado**: Puntuación ponderada por historial + recencia + favoritos + Spotify que genera **Mixes Diarios**, **Selección Rápida**, **Para Redescubrir**, **Artistas para ti** y **Flow Infinito por estado de ánimo**.
+- **Inicio Editorial Translúcido**: Saludo dinámico, **Rueda FLOW interactiva** con selector de estados de ánimo integrado, cuadrícula rápida 2x3, pósters de Mixes Diarios, carrusel de 4 filas de Selección Rápida y avatares circulares de artistas.
+- **Configuración Agrupada y Estudio Profundo**: Menú de configuración segmentado por categorías con animaciones de presión, **Vista Previa en vivo** en el Estudio de Apariencia (6 pestañas, saturación + tono dual, escala tipográfica, AMOLED negro puro, 8 presets), **100% en Español** y verificador de actualizaciones integrado.
 
 ## Licencia
 GPL-3.0

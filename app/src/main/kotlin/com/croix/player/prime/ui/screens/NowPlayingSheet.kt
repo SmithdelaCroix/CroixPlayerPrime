@@ -348,8 +348,10 @@ fun NowPlayingOverlay(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.OfflinePin, null, tint = palette.secondary, modifier = Modifier.size(13.dp))
                                 Spacer(Modifier.width(3.dp))
-                                Text("Offline", fontSize = 11.sp, color = palette.secondary)
+                                Text("Sin conexión", fontSize = 11.sp, color = palette.secondary)
                             }
+                        } else if (playback.activeStreamInfo.isNotBlank()) {
+                            Text(playback.activeStreamInfo, fontSize = 11.sp, color = palette.secondary)
                         }
                         if (playback.sponsorSegments.isNotEmpty() && design.sponsorBlockEnabled) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -677,6 +679,7 @@ private fun CarAodModeOverlay(
     onPrev: () -> Unit,
 ) {
     val palette = LocalCroixPalette.current
+    val es = LocalCroixStrings.current.isSpanish
     val blocker = remember { MutableInteractionSource() }
     Column(
         modifier = Modifier
@@ -690,9 +693,9 @@ private fun CarAodModeOverlay(
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("CAR / AOD MODE", color = palette.primary, fontWeight = FontWeight.Black)
+            Text(if (es) "MODO AUTO / PANTALLA" else "CAR / AOD MODE", color = palette.primary, fontWeight = FontWeight.Black)
             CroixGlassCard(cornerRadius = 50.dp, onClick = onExit) {
-                Text("Exit", color = Color.White, modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
+                Text(if (es) "Salir" else "Exit", color = Color.White, modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -767,12 +770,17 @@ private fun SyncedLyricsPanel(
         PrimeLyricsAlign.END -> TextAlign.End
     }
 
+    val es = LocalCroixStrings.current.isSpanish
     if (isLoading) {
         CircularProgressIndicator(color = palette.primary)
         return
     }
     if (lyrics == null || (lyrics.synced.isEmpty() && lyrics.plain.isBlank())) {
-        Text("No lyrics found on LRCLib for this track.", color = palette.textSecondary)
+        Text(
+            if (es) "No se encontraron letras sincronizadas para esta canción." else "No lyrics found on LRCLib for this track.",
+            color = palette.textSecondary,
+            textAlign = TextAlign.Center,
+        )
         return
     }
     if (lyrics.synced.isEmpty()) {
@@ -878,6 +886,7 @@ private fun EqualizerAndSleepPanel(
     onSetLoudness: (Int) -> Unit,
 ) {
     val palette = LocalCroixPalette.current
+    val es = LocalCroixStrings.current.isSpanish
     val bandLabels = listOf("60Hz", "230Hz", "910Hz", "3.6kHz", "14kHz")
 
     CroixGlassCard(modifier = Modifier.fillMaxSize()) {
@@ -888,24 +897,24 @@ private fun EqualizerAndSleepPanel(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Speed, Pitch & Skip Silence", color = palette.primary, fontWeight = FontWeight.Bold)
+            Text(if (es) "Velocidad, Tono y Silencios" else "Speed, Pitch & Skip Silence", color = palette.primary, fontWeight = FontWeight.Bold)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Speed", color = Color.White, fontSize = 13.sp)
+                Text(if (es) "Velocidad" else "Speed", color = Color.White, fontSize = 13.sp)
                 Text("${"%.2f".format(playback.playbackSpeed)}x", color = palette.primary, fontSize = 13.sp)
             }
             Slider(value = playback.playbackSpeed, onValueChange = onSetSpeed, valueRange = 0.5f..2.0f)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Pitch", color = Color.White, fontSize = 13.sp)
+                Text(if (es) "Tono (Pitch)" else "Pitch", color = Color.White, fontSize = 13.sp)
                 Text("${"%.2f".format(playback.playbackPitch)}x", color = palette.primary, fontSize = 13.sp)
             }
             Slider(value = playback.playbackPitch, onValueChange = onSetPitch, valueRange = 0.5f..2.0f)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Skip Silence", color = Color.White, fontSize = 13.sp)
+                Text(if (es) "Saltar silencios" else "Skip Silence", color = Color.White, fontSize = 13.sp)
                 Switch(checked = playback.skipSilenceEnabled, onCheckedChange = onSetSkipSilence)
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("5-Band Equalizer", color = palette.primary, fontWeight = FontWeight.Bold)
+                Text(if (es) "Ecualizador de 5 Bandas" else "5-Band Equalizer", color = palette.primary, fontWeight = FontWeight.Bold)
                 Switch(checked = playback.eqEnabled, onCheckedChange = onSetEqEnabled)
             }
             Row(
@@ -935,10 +944,10 @@ private fun EqualizerAndSleepPanel(
                 }
             }
 
-            Text("Bass Boost: ${(playback.bassBoostLevel * 100).roundToInt()}%", color = Color.White, fontSize = 13.sp)
+            Text("${if (es) "Refuerzo de Graves" else "Bass Boost"}: ${(playback.bassBoostLevel * 100).roundToInt()}%", color = Color.White, fontSize = 13.sp)
             Slider(value = playback.bassBoostLevel, onValueChange = onSetBassBoost, valueRange = 0f..1f)
 
-            Text("Loudness Boost: +${playback.loudnessGainMb / 100} dB", color = Color.White, fontSize = 13.sp)
+            Text("${if (es) "Ganancia de Volumen" else "Loudness Boost"}: +${playback.loudnessGainMb / 100} dB", color = Color.White, fontSize = 13.sp)
             Slider(value = playback.loudnessGainMb.toFloat(), onValueChange = { onSetLoudness(it.roundToInt()) }, valueRange = 0f..1200f)
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -946,14 +955,14 @@ private fun EqualizerAndSleepPanel(
                 Spacer(Modifier.width(6.dp))
                 Text(
                     text = if (playback.sleepTimerRemainingSec > 0) {
-                        "Sleep Timer (${playback.sleepTimerRemainingSec / 60}m ${playback.sleepTimerRemainingSec % 60}s)"
-                    } else "Sleep Timer (Fade-out)",
+                        "${if (es) "Temporizador" else "Sleep Timer"} (${playback.sleepTimerRemainingSec / 60}m ${playback.sleepTimerRemainingSec % 60}s)"
+                    } else if (es) "Temporizador (Apagado suave)" else "Sleep Timer (Fade-out)",
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0 to "Off", 15 to "15m", 30 to "30m", 60 to "60m").forEach { (mins, lbl) ->
+                listOf(0 to (if (es) "Apagar" else "Off"), 15 to "15m", 30 to "30m", 60 to "60m").forEach { (mins, lbl) ->
                     CroixGlassCard(cornerRadius = 12.dp, onClick = { onSetSleepTimer(mins) }) {
                         Text(lbl, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                     }

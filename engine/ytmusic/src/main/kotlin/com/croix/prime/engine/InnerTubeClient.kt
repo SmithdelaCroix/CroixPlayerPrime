@@ -46,8 +46,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 class InnerTubeClient(
-    private val localeHl: String = "en",
-    private val localeGl: String = "US",
+    private val localeHl: String = "es",
+    private val localeGl: String = Locale.getDefault().country.ifBlank { "US" },
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -76,10 +76,27 @@ class InnerTubeClient(
     @Volatile
     var serverConfig: ServerConnectionConfig = ServerConnectionConfig()
 
+    @Volatile
+    var audioQualityMode: AudioQualityMode = AudioQualityMode.MAX_QUALITY
+
     fun updateServerConfig(config: ServerConnectionConfig) {
         val modeChanged = serverConfig.mode != config.mode || serverConfig.activeRelayUrl != config.activeRelayUrl
         serverConfig = config
         if (modeChanged) streamCache.clear()
+    }
+
+    fun updateAudioQuality(mode: AudioQualityMode) {
+        if (audioQualityMode != mode) {
+            audioQualityMode = mode
+            streamCache.clear()
+        }
+    }
+
+    suspend fun prefetchAudioStream(videoId: String) {
+        if (videoId.isBlank()) return
+        val cached = streamCache[videoId]
+        if (cached != null && cached.expiresAtEpochMs > System.currentTimeMillis() + 120_000L) return
+        runCatching { resolveAudioStream(videoId) }
     }
 
     fun markStreamClientFailed(videoId: String, clientKey: String) {
@@ -174,12 +191,13 @@ class InnerTubeClient(
     }
 
     val defaultMoods: List<MoodChip> = listOf(
-        MoodChip("Focus", "focus instrumental music", 0xFF00E5FF),
-        MoodChip("Workout", "high energy workout music", 0xFFFF3D71),
-        MoodChip("Chill", "chill lofi night vibes", 0xFFA238FF),
-        MoodChip("Party", "electronic dance hits", 0xFFFFAA00),
-        MoodChip("Romance", "romantic acoustic pop", 0xFFFF4081),
-        MoodChip("Sleep", "ambient deep sleep music", 0xFF3D5AFE),
+        MoodChip("Energía", "musica energia entrenamiento hits", 0xFFFF3D71),
+        MoodChip("Chill", "chill lofi relax vibes", 0xFFA238FF),
+        MoodChip("Concentración", "focus instrumental study music", 0xFF00E5FF),
+        MoodChip("Fiesta", "electronic dance reggaeton party hits", 0xFFFFAA00),
+        MoodChip("Amor", "romantic acoustic pop ballads", 0xFFFF4081),
+        MoodChip("Noche", "late night synthwave ambient vibes", 0xFF3D5AFE),
+        MoodChip("Workout", "gym workout phonk trap energy", 0xFF00E676),
     )
 
     suspend fun fetchHomeSections(): List<HomeSection> = withContext(Dispatchers.IO) {
@@ -195,10 +213,10 @@ class InnerTubeClient(
 
         if (sections.isEmpty()) {
             // Reliable fallback via curated YT Music searches so Home is never empty
-            val quick = searchSongs("top hits music 2026", limit = 16)
+            val quick = searchSongs("exitos musicales populares 2026", limit = 16)
             val chill = searchSongs("chill electronic pop hits", limit = 12)
-            if (quick.isNotEmpty()) sections += HomeSection("Quick Picks", quick)
-            if (chill.isNotEmpty()) sections += HomeSection("Trending Mix", chill)
+            if (quick.isNotEmpty()) sections += HomeSection("Éxitos del momento", quick)
+            if (chill.isNotEmpty()) sections += HomeSection("Mezcla en tendencia", chill)
         }
         sections
     }
@@ -805,24 +823,40 @@ class InnerTubeClient(
 
         val streamingData = root["streamingData"]?.jsonObject ?: return null
         val expiresSec = streamingData["expiresInSeconds"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 14_400L
+        val expectedDurationMs = root["videoDetails"]?.jsonObject
+            ?.get("lengthSeconds")?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.times(1000L) ?: 0L
+        val loudnessDb = root["playerConfig"]?.jsonObject
+            ?.get("audioConfig")?.jsonObject
+            ?.get("loudnessDb")?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
         val adaptive = streamingData["adaptiveFormats"]?.jsonArray.orEmpty()
         val formats = streamingData["formats"]?.jsonArray.orEmpty()
 
-        // Prefer adaptive audio-only formats (highest bitrate audio/mp4 or audio/webm),
-        // fall back to muxed progressive formats if adaptive audio is unavailable.
-        val audioCandidates = adaptive
+        val rawAudio = adaptive
             .mapNotNull { it as? JsonObject }
             .filter { fmt ->
                 val mime = fmt["mimeType"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                mime.startsWith("audio/")
+                if (!mime.startsWith("audio/")) return@filter false
+                val approxMs = fmt["approxDurationMs"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                // Skip tiny preview clips when full track is longer than 60s
+                !(expectedDurationMs > 60_000L && approxMs in 1L..35_000L)
             }
-            .sortedWith(
+
+        val sortedAudio = when (audioQualityMode) {
+            AudioQualityMode.MAX_QUALITY -> rawAudio.sortedWith(
                 compareByDescending<JsonObject> { fmt ->
-                    // Prefer standard mp4a/opus non-DRC streams
                     val mime = fmt["mimeType"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                    if ("mp4a" in mime || "opus" in mime) 1 else 0
+                    if ("opus" in mime || "mp4a" in mime) 1 else 0
                 }.thenByDescending { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 },
-            ) + formats.mapNotNull { it as? JsonObject }.sortedByDescending { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 }
+            )
+            AudioQualityMode.BALANCED -> rawAudio.sortedBy {
+                kotlin.math.abs((it["bitrate"]?.jsonPrimitive?.intOrNull ?: 128_000) - 128_000)
+            }
+            AudioQualityMode.DATA_SAVER -> rawAudio.sortedBy {
+                it["bitrate"]?.jsonPrimitive?.intOrNull ?: 64_000
+            }
+        }
+        val audioCandidates = sortedAudio + formats.mapNotNull { it as? JsonObject }
+            .sortedByDescending { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 }
 
         for (fmt in audioCandidates.take(6)) {
             val rawUrl = resolveFormatUrl(fmt, videoId, client) ?: continue
@@ -838,6 +872,7 @@ class InnerTubeClient(
                 userAgent = client.userAgent,
                 origin = if (client.isWebLike) client.origin else null,
                 referer = if (client.isWebLike) client.referer else null,
+                loudnessDb = loudnessDb,
                 expiresAtEpochMs = System.currentTimeMillis() + (expiresSec * 1000L).coerceAtLeast(600_000L),
             )
         }

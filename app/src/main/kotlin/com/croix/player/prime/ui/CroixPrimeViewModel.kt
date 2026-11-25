@@ -14,6 +14,8 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
+import com.croix.player.prime.data.AppUpdateChecker
+import com.croix.player.prime.data.AppUpdateInfo
 import com.croix.player.prime.data.CroixDatabase
 import com.croix.player.prime.data.DownloadedTrackEntity
 import com.croix.player.prime.data.FavoriteTrackEntity
@@ -26,12 +28,15 @@ import com.croix.player.prime.data.ServerSessionState
 import com.croix.player.prime.data.UserPlaylistEntity
 import com.croix.prime.design.CroixDesignRepository
 import com.croix.prime.design.CroixDesignState
+import com.croix.prime.design.PrimeAudioQuality
 import com.croix.prime.design.PrimePresets
 import com.croix.prime.design.resolveCroixStrings
 import com.croix.prime.engine.AdBlockEngine
 import com.croix.prime.engine.AlbumDetail
 import com.croix.prime.engine.AlbumSummary
 import com.croix.prime.engine.ArtistProfile
+import com.croix.prime.engine.AudioQualityMode
+import com.croix.prime.engine.HomeFeedBundle
 import com.croix.prime.engine.HomeSection
 import com.croix.prime.engine.HybridAlgorithmEngine
 import com.croix.prime.engine.InnerTubeClient
@@ -107,6 +112,8 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         localFileProvider = { id -> downloadManager.getDownloadedFile(id) },
         enabledCategoriesProvider = { designState.value.enabledSponsorCategories() },
         crossfadeSecondsProvider = { designState.value.crossfadeSeconds },
+        normalizeAudioProvider = { designState.value.normalizeAudio },
+        autoPlayRelatedProvider = { designState.value.autoPlayRelated },
     )
 
     private val shakeDetector = CroixShakeDetector(appContext) {
@@ -169,11 +176,14 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     val moods: List<MoodChip> = innerTube.defaultMoods
 
-    private val _homeSections = MutableStateFlow<List<HomeSection>>(emptyList())
-    val homeSections: StateFlow<List<HomeSection>> = _homeSections.asStateFlow()
+    private val _homeFeed = MutableStateFlow(HomeFeedBundle())
+    val homeFeed: StateFlow<HomeFeedBundle> = _homeFeed.asStateFlow()
 
     private val _homeLoading = MutableStateFlow(true)
     val homeLoading: StateFlow<Boolean> = _homeLoading.asStateFlow()
+
+    private val _updateInfo = MutableStateFlow(AppUpdateInfo())
+    val updateInfo: StateFlow<AppUpdateInfo> = _updateInfo.asStateFlow()
 
     val recentSearches: StateFlow<List<String>> = dao.observeRecentSearches()
         .map { rows -> rows.map { it.query } }
@@ -217,8 +227,9 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     init {
         observeServerConfig()
         refreshHome()
+        checkForUpdates()
         observeCurrentTrackSideEffects()
-        observeShakePreference()
+        observeDesignPreferences()
     }
 
     private fun observeServerConfig() {
@@ -235,11 +246,24 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private fun observeShakePreference() {
+    private fun observeDesignPreferences() {
         viewModelScope.launch {
             designState.collect { cfg ->
                 shakeDetector.configure(cfg.shakeToSkipEnabled, cfg.shakeSensitivity)
+                val q = when (cfg.audioQuality) {
+                    PrimeAudioQuality.MAX_QUALITY -> AudioQualityMode.MAX_QUALITY
+                    PrimeAudioQuality.BALANCED -> AudioQualityMode.BALANCED
+                    PrimeAudioQuality.DATA_SAVER -> AudioQualityMode.DATA_SAVER
+                }
+                innerTube.updateAudioQuality(q)
             }
+        }
+    }
+
+    fun checkForUpdates() {
+        viewModelScope.launch {
+            _updateInfo.value = _updateInfo.value.copy(checking = true, error = null)
+            _updateInfo.value = AppUpdateChecker.checkForUpdate()
         }
     }
 
@@ -303,30 +327,40 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
             innerTube.updateServerConfig(session.serverConfig)
             val ytSections = innerTube.fetchHomeSections()
             val isSpanish = resolveCroixStrings(designState.value.languageMode).isSpanish
-            val blended = hybridEngine.buildBlendedHomeSections(
+            val records = historyEntities.value.map {
+                HybridAlgorithmEngine.WeightedPlayRecord(
+                    track = it.toTrack(),
+                    playCount = it.playCount,
+                    playedAtMs = it.playedAtMs,
+                )
+            }
+            val bundle = hybridEngine.buildRichHomeFeed(
                 ytSections = ytSections,
                 spotifyTaste = session.spotifyTaste.takeIf { session.isSpotifyConnected },
                 localFavorites = favorites.value,
-                localHistory = history.value,
+                localHistoryRecords = records,
                 blendWeight = session.spotifyBlendWeight,
                 isSpanish = isSpanish,
             )
-            _homeSections.value = blended
+            _homeFeed.value = bundle
             _adsBlockedCount.value = AdBlockEngine.blockedCount.get()
             _homeLoading.value = false
         }
     }
 
-    fun startCroixFlow() {
+    fun startCroixFlow(mood: MoodChip? = null) {
         viewModelScope.launch {
             val session = serverState.value
-            val fallback = _homeSections.value.firstOrNull()?.tracks.orEmpty()
+            val fallback = _homeFeed.value.quickPicks.ifEmpty {
+                _homeFeed.value.shelves.firstOrNull()?.tracks.orEmpty()
+            }
             val queue = hybridEngine.buildHybridFlowQueue(
                 spotifyTaste = session.spotifyTaste.takeIf { session.isSpotifyConnected },
                 localFavorites = favorites.value,
                 localHistory = history.value,
                 fallbackTracks = fallback,
                 blendWeight = session.spotifyBlendWeight,
+                moodQuery = mood?.query,
             )
             if (queue.isNotEmpty()) {
                 playerController.playTrack(queue.first(), queue, autoFetchRadio = true)

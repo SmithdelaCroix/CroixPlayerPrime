@@ -50,6 +50,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -95,16 +96,20 @@ val LocalCroixPalette = staticCompositionLocalOf {
     )
 }
 
-private val PrimeTypography = Typography(
-    headlineLarge = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.8).sp),
-    headlineMedium = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp),
-    titleLarge = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
-    titleMedium = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold),
-    bodyLarge = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Medium),
-    bodyMedium = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Normal),
-    bodySmall = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal),
-    labelMedium = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-)
+private fun buildPrimeTypography(scale: Float): Typography {
+    val s = scale.coerceIn(0.85f, 1.20f)
+    return Typography(
+        headlineLarge = TextStyle(fontSize = (30f * s).sp, fontWeight = FontWeight.Black, letterSpacing = (-0.8).sp),
+        headlineMedium = TextStyle(fontSize = (24f * s).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp),
+        titleLarge = TextStyle(fontSize = (20f * s).sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
+        titleMedium = TextStyle(fontSize = (16f * s).sp, fontWeight = FontWeight.Bold),
+        bodyLarge = TextStyle(fontSize = (15f * s).sp, fontWeight = FontWeight.Medium),
+        bodyMedium = TextStyle(fontSize = (14f * s).sp, fontWeight = FontWeight.Normal),
+        bodySmall = TextStyle(fontSize = (12f * s).sp, fontWeight = FontWeight.Normal),
+        labelMedium = TextStyle(fontSize = (12f * s).sp, fontWeight = FontWeight.SemiBold),
+        labelSmall = TextStyle(fontSize = (11f * s).sp, fontWeight = FontWeight.SemiBold),
+    )
+}
 
 @Composable
 fun CroixPrimeTheme(
@@ -136,8 +141,8 @@ fun CroixPrimeTheme(
             PrimeColorMode.CUSTOM_GRADIENT -> safeDesign.customSecondaryFromHue
         }
     }
-    val targetBg = when (safeDesign.colorMode) {
-        PrimeColorMode.AMOLED_BLACK -> Color.Black
+    val targetBg = when {
+        safeDesign.pureBlackBackground || safeDesign.colorMode == PrimeColorMode.AMOLED_BLACK -> Color.Black
         else -> Color(0xFF0A0910)
     }
 
@@ -175,6 +180,9 @@ fun CroixPrimeTheme(
     val strings = androidx.compose.runtime.remember(safeDesign.languageMode) {
         resolveCroixStrings(safeDesign.languageMode)
     }
+    val typography = androidx.compose.runtime.remember(safeDesign.fontScale) {
+        buildPrimeTypography(safeDesign.fontScale)
+    }
 
     CompositionLocalProvider(
         LocalCroixDesign provides safeDesign,
@@ -183,7 +191,7 @@ fun CroixPrimeTheme(
     ) {
         MaterialTheme(
             colorScheme = m3Scheme,
-            typography = PrimeTypography,
+            typography = typography,
             content = content,
         )
     }
@@ -259,6 +267,7 @@ fun CroixGlassCard(
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null,
     cornerRadius: Dp = LocalCroixDesign.current.cornerRadiusDp.dp,
+    shapeOverride: Shape? = null,
     opacityOverride: Float? = null,
     accentTint: Color? = null,
     onClick: (() -> Unit)? = null,
@@ -266,7 +275,7 @@ fun CroixGlassCard(
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
-    val shape = RoundedCornerShape(cornerRadius)
+    val shape = shapeOverride ?: RoundedCornerShape(cornerRadius)
     val effectiveAlpha = (opacityOverride ?: design.glassOpacity).coerceIn(0.04f, 0.85f)
     val baseFill = (accentTint ?: Color.White).copy(alpha = effectiveAlpha)
 

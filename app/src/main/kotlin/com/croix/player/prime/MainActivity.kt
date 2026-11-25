@@ -111,8 +111,9 @@ class MainActivity : ComponentActivity() {
 private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val design by vm.designState.collectAsState()
     val playback by vm.playbackState.collectAsState()
-    val homeSections by vm.homeSections.collectAsState()
+    val homeFeed by vm.homeFeed.collectAsState()
     val homeLoading by vm.homeLoading.collectAsState()
+    val updateInfo by vm.updateInfo.collectAsState()
     val favorites by vm.favorites.collectAsState()
     val history by vm.history.collectAsState()
     val downloads by vm.downloads.collectAsState()
@@ -226,14 +227,18 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     ) { route ->
                         when (route) {
                             "home" -> HomeScreen(
-                                sections = homeSections,
+                                feed = homeFeed,
                                 recentTracks = history,
                                 moods = vm.moods,
+                                favoriteIds = favoriteIds,
+                                spotifyConnected = serverState.isSpotifyConnected,
                                 isLoading = homeLoading,
                                 bottomPaddingDp = bottomClearance,
                                 onPlayFlow = vm::startCroixFlow,
-                                onPlayMood = vm::playMood,
                                 onPlayTrack = vm::playTrack,
+                                onToggleFavorite = vm::toggleFavorite,
+                                onOpenTrackMenu = { trackForMenu = it },
+                                onOpenArtist = { name, bid -> vm.openArtist(name, bid) },
                                 onRefresh = vm::refreshHome,
                                 onOpenSettings = { settingsOpen = true },
                             )
@@ -444,6 +449,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     adsBlockedCount = adsBlockedCount,
                     spotifySyncing = spotifySyncing,
                     serverNotice = serverNotice,
+                    updateInfo = updateInfo,
                     onClose = { settingsOpen = false },
                     onUpdateDesign = vm::updateDesign,
                     onApplyPreset = vm::applyPreset,
@@ -470,6 +476,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     },
                     onDisconnectSpotify = vm::disconnectSpotify,
                     onImportSpotifyPlaylist = vm::importSpotifyPlaylist,
+                    onCheckUpdates = vm::checkForUpdates,
                 )
             }
 
@@ -547,7 +554,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
         if (targetTrack != null) {
             AlertDialog(
                 onDismissRequest = { trackForPlaylistDialog = null },
-                title = { Text("Add to Playlist") },
+                title = { Text(strings.addToPlaylist) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         playlists.forEach { pl ->
@@ -565,7 +572,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                         OutlinedTextField(
                             value = quickNewPlaylistName,
                             onValueChange = { quickNewPlaylistName = it },
-                            label = { Text("Or create new playlist") },
+                            label = { Text(if (strings.isSpanish) "O crear nueva playlist" else "Or create new playlist") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -578,10 +585,10 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                             vm.createPlaylist(quickNewPlaylistName)
                             quickNewPlaylistName = ""
                         },
-                    ) { Text("Create") }
+                    ) { Text(strings.create) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { trackForPlaylistDialog = null }) { Text("Close") }
+                    TextButton(onClick = { trackForPlaylistDialog = null }) { Text(strings.close) }
                 },
             )
         }

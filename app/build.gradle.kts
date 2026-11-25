@@ -30,8 +30,8 @@ android {
         applicationId = "com.croix.player.prime"
         minSdk = 31
         targetSdk = 35
-        versionCode = 6
-        versionName = "2.4.0-prime"
+        versionCode = 7
+        versionName = "2.5.0-prime"
     }
 
     splits {
@@ -101,6 +101,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime)
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.datastore)
     implementation(libs.androidx.palette)
 
     implementation(platform(libs.compose.bom))

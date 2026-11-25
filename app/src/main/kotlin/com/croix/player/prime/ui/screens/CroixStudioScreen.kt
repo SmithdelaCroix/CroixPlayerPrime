@@ -38,14 +38,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -72,6 +80,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.croix.player.prime.data.ServerSessionState
 import com.croix.prime.design.CroixAnimatedBackdrop
 import com.croix.prime.design.CroixDesignState
 import com.croix.prime.design.CroixGlassCard
@@ -89,12 +98,18 @@ import com.croix.prime.design.PrimePresets
 import com.croix.prime.design.PrimeProgressStyle
 import com.croix.prime.design.PrimeTransitionStyle
 import com.croix.prime.design.PrimeVisualizerStyle
+import com.croix.prime.engine.ServerConnectionConfig
+import com.croix.prime.engine.ServerHealthStatus
+import com.croix.prime.engine.ServerPresets
+import com.croix.prime.engine.SpotifyPlaylistSummary
+import com.croix.prime.engine.YtMusicServerMode
 import com.croix.prime.playback.EqPreset
 import com.croix.prime.playback.PlaybackUiState
 import kotlin.math.roundToInt
 
 private enum class SettingsPage(val title: String) {
     HOME("Settings"),
+    SERVERS("Servers, Ad-Block & Spotify"),
     STUDIO("Appearance & Studio"),
     AUDIO("Audio, EQ & Speed"),
     GESTURES("Gestures & Hardware"),
@@ -104,6 +119,11 @@ private enum class SettingsPage(val title: String) {
 @Composable
 fun SettingsAndStudioOverlay(
     playback: PlaybackUiState,
+    serverState: ServerSessionState,
+    serverHealth: ServerHealthStatus?,
+    adsBlockedCount: Int,
+    spotifySyncing: Boolean,
+    serverNotice: String?,
     onClose: () -> Unit,
     onUpdateDesign: ((CroixDesignState) -> CroixDesignState) -> Unit,
     onApplyPreset: (CroixDesignState) -> Unit,
@@ -115,6 +135,17 @@ fun SettingsAndStudioOverlay(
     onSetEqBand: (Int, Float) -> Unit,
     onSetBassBoost: (Float) -> Unit,
     onSetLoudness: (Int) -> Unit,
+    onUpdateServerConfig: ((ServerConnectionConfig) -> ServerConnectionConfig) -> Unit,
+    onPingServer: () -> Unit,
+    onOpenYtMusicLogin: () -> Unit,
+    onDisconnectYtMusic: () -> Unit,
+    onOpenSpotifyLogin: () -> Unit,
+    onConnectSpotifyManual: (String) -> Unit,
+    onSyncSpotifyNow: () -> Unit,
+    onSetSpotifyBlendWeight: (Float) -> Unit,
+    onApplyAlgorithmBlend: () -> Unit,
+    onDisconnectSpotify: () -> Unit,
+    onImportSpotifyPlaylist: (SpotifyPlaylistSummary) -> Unit,
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
@@ -128,6 +159,11 @@ fun SettingsAndStudioOverlay(
     var showImport by remember { mutableStateOf(false) }
     var importJson by remember { mutableStateOf("") }
     var importErr by remember { mutableStateOf<String?>(null) }
+    var showManualSpDc by remember { mutableStateOf(false) }
+    var manualSpDc by remember { mutableStateOf("") }
+    var customServerDraft by remember(serverState.serverConfig.customServerUrl) {
+        mutableStateOf(serverState.serverConfig.customServerUrl)
+    }
 
     BackHandler(enabled = page != SettingsPage.HOME) {
         page = SettingsPage.HOME
@@ -167,6 +203,7 @@ fun SettingsAndStudioOverlay(
                 Column {
                     val pageTitle = when (page) {
                         SettingsPage.HOME -> strings.settingsTitle
+                        SettingsPage.SERVERS -> strings.settingsServers
                         SettingsPage.STUDIO -> strings.settingsAppearance
                         SettingsPage.AUDIO -> strings.settingsAudio
                         SettingsPage.GESTURES -> strings.settingsGestures
@@ -211,6 +248,21 @@ fun SettingsAndStudioOverlay(
                 ) {
                     when (activePage) {
                 SettingsPage.HOME -> {
+                    item {
+                        SettingsMenuRow(
+                            icon = Icons.Rounded.Dns,
+                            title = strings.settingsServers,
+                            subtitle = buildString {
+                                append(if (strings.isSpanish) serverState.serverConfig.mode.labelEs else serverState.serverConfig.mode.labelEn)
+                                append(" • Ad-Block")
+                                if (serverState.isSpotifyConnected) {
+                                    append(" • Spotify ${(serverState.spotifyBlendWeight * 100).roundToInt()}%")
+                                }
+                            },
+                            accent = palette.secondary,
+                            onClick = { page = SettingsPage.SERVERS },
+                        )
+                    }
                     item {
                         SettingsMenuRow(
                             icon = Icons.Rounded.Palette,
@@ -274,8 +326,279 @@ fun SettingsAndStudioOverlay(
                             ) {
                                 Icon(Icons.Rounded.Info, null, tint = palette.textSecondary)
                                 Column {
-                                    Text("Croix Player Prime v2.4.0", color = Color.White, fontWeight = FontWeight.Bold)
-                                    Text("120fps Glass Engine • arm64-v8a • GPL-3.0", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                    Text("Croix Player Prime v2.5.0", color = Color.White, fontWeight = FontWeight.Bold)
+                                    Text("120fps Glass Engine • Ad-Block Server • Spotify Blend", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                SettingsPage.SERVERS -> {
+                    if (serverNotice != null) {
+                        item {
+                            CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary) {
+                                Text(
+                                    text = serverNotice,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(14.dp),
+                                )
+                            }
+                        }
+                    }
+
+                    // 1. YouTube Music Server & Ad-Block Card
+                    item {
+                        val cfg = serverState.serverConfig
+                        CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Icon(Icons.Rounded.CloudDone, null, tint = palette.primary)
+                                        Text(strings.ytServerSection, color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    CroixGlassCard(cornerRadius = 50.dp, onClick = onPingServer) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        ) {
+                                            Icon(Icons.Rounded.Refresh, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                            Text(strings.pingServer, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+
+                                // Live Health & Ad-Block Counter Strip
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    val statusColor = when {
+                                        serverHealth == null -> palette.textSecondary
+                                        serverHealth.reachable -> Color(0xFF00E676)
+                                        else -> Color(0xFFFF5252)
+                                    }
+                                    CroixGlassCard(modifier = Modifier.weight(1f), cornerRadius = 14.dp) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Text(
+                                                text = serverHealth?.endpointLabel ?: "music.youtube.com",
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                            )
+                                            Text(
+                                                text = when {
+                                                    serverHealth == null -> "..."
+                                                    serverHealth.reachable -> "● Online • ${serverHealth.latencyMs} ms"
+                                                    else -> "● ${serverHealth.message}"
+                                                },
+                                                color = statusColor,
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                    }
+                                    CroixGlassCard(modifier = Modifier.weight(1f), cornerRadius = 14.dp, accentTint = palette.secondary) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Text(strings.adsBlockedLabel, color = palette.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                            Text("$adsBlockedCount+", color = Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                                        }
+                                    }
+                                }
+
+                                StudioEnumRow(
+                                    title = strings.ytServerModeLabel,
+                                    entries = YtMusicServerMode.entries,
+                                    selected = cfg.mode,
+                                    labelOf = { if (strings.isSpanish) it.labelEs else it.labelEn },
+                                ) { m ->
+                                    onUpdateServerConfig { it.copy(mode = m) }
+                                }
+
+                                if (cfg.mode == YtMusicServerMode.PIPED_RELAY) {
+                                    Text(
+                                        if (strings.isSpanish) "Nodo Relay Piped (Sin anuncios)" else "Piped Relay Node (Ad-Free)",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Row(
+                                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        ServerPresets.PipedNodes.forEach { node ->
+                                            CroixGlassCard(
+                                                cornerRadius = 12.dp,
+                                                accentTint = if (cfg.pipedBaseUrl == node.apiBaseUrl) palette.primary else null,
+                                                onClick = { onUpdateServerConfig { it.copy(pipedBaseUrl = node.apiBaseUrl) } },
+                                            ) {
+                                                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                                    Text(node.name, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                                    Text(node.region, color = palette.textSecondary, style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (cfg.mode == YtMusicServerMode.CUSTOM_INSTANCE) {
+                                    OutlinedTextField(
+                                        value = customServerDraft,
+                                        onValueChange = { customServerDraft = it },
+                                        label = { Text("https://my-piped-server.example") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    Button(
+                                        onClick = { onUpdateServerConfig { it.copy(customServerUrl = customServerDraft.trim()) } },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(if (strings.isSpanish) "Guardar y Conectar Servidor" else "Save & Connect Server")
+                                    }
+                                }
+
+                                StudioSwitch(strings.strictAdBlockLabel, cfg.strictAdBlockEnabled) { enabled ->
+                                    onUpdateServerConfig { it.copy(strictAdBlockEnabled = enabled) }
+                                }
+
+                                // Optional YouTube Music Account Sync
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("YouTube Music", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            if (serverState.isYtMusicConnected) "${strings.connectedAs}: ${cfg.ytMusicAccountName}" else strings.notConnected,
+                                            color = if (serverState.isYtMusicConnected) Color(0xFF00E676) else palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                    if (serverState.isYtMusicConnected) {
+                                        OutlinedButton(onClick = onDisconnectYtMusic) { Text(strings.disconnect) }
+                                    } else {
+                                        Button(onClick = onOpenYtMusicLogin) { Text(strings.connectYtMusic) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Spotify Algorithm & Taste Blend Card
+                    item {
+                        val taste = serverState.spotifyTaste
+                        CroixGlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            accentTint = Color(0xFF1DB954),
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Icon(Icons.Rounded.AutoAwesome, null, tint = Color(0xFF1DB954))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(strings.spotifySectionTitle, color = Color.White, fontWeight = FontWeight.Bold)
+                                        Text(strings.spotifySectionSub, color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    if (spotifySyncing) {
+                                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color(0xFF1DB954))
+                                    }
+                                }
+
+                                if (serverState.isSpotifyConnected) {
+                                    CroixGlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 14.dp) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Icon(Icons.Rounded.CheckCircle, null, tint = Color(0xFF1DB954))
+                                                Column {
+                                                    Text(taste.accountName, color = Color.White, fontWeight = FontWeight.Bold)
+                                                    Text(
+                                                        "${taste.topArtists.size} Artists • ${taste.allSeedTracks.size} Tracks • ${taste.playlists.size} Playlists",
+                                                        color = palette.textSecondary,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                    )
+                                                }
+                                            }
+                                            OutlinedButton(onClick = onDisconnectSpotify) { Text(strings.disconnect) }
+                                        }
+                                    }
+
+                                    StudioSlider(
+                                        label = strings.algoBlendLabel,
+                                        value = serverState.spotifyBlendWeight,
+                                        range = 0f..1f,
+                                        valueLabel = "${(serverState.spotifyBlendWeight * 100).roundToInt()}% Spotify / ${((1f - serverState.spotifyBlendWeight) * 100).roundToInt()}% YT",
+                                        onChange = onSetSpotifyBlendWeight,
+                                    )
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                        Button(
+                                            onClick = onSyncSpotifyNow,
+                                            enabled = !spotifySyncing,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(strings.syncSpotifyNow)
+                                        }
+                                        OutlinedButton(
+                                            onClick = onApplyAlgorithmBlend,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            Text(if (strings.isSpanish) "Aplicar al Inicio" else "Apply to Home")
+                                        }
+                                    }
+
+                                    if (taste.playlists.isNotEmpty()) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(strings.importSpotifyPlaylists, color = Color(0xFF1DB954), fontWeight = FontWeight.Bold)
+                                        taste.playlists.take(10).forEach { pl ->
+                                            CroixGlassCard(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                cornerRadius = 12.dp,
+                                                onClick = { if (!spotifySyncing) onImportSpotifyPlaylist(pl) },
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(pl.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                                        Text("${pl.trackCount} tracks", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                                    }
+                                                    Icon(Icons.Rounded.Download, null, tint = Color(0xFF1DB954))
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                        Button(
+                                            onClick = onOpenSpotifyLogin,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            Icon(Icons.Rounded.Link, null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(strings.connectSpotify)
+                                        }
+                                        OutlinedButton(
+                                            onClick = { manualSpDc = ""; showManualSpDc = true },
+                                        ) {
+                                            Text("sp_dc")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -595,6 +918,32 @@ fun SettingsAndStudioOverlay(
                 }
             }
         }
+    }
+
+    if (showManualSpDc) {
+        AlertDialog(
+            onDismissRequest = { showManualSpDc = false },
+            title = { Text("Spotify sp_dc Cookie") },
+            text = {
+                OutlinedTextField(
+                    value = manualSpDc,
+                    onValueChange = { manualSpDc = it },
+                    label = { Text("Paste sp_dc value") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                Button(
+                    enabled = manualSpDc.isNotBlank(),
+                    onClick = {
+                        onConnectSpotifyManual(manualSpDc.trim())
+                        showManualSpDc = false
+                    },
+                ) { Text(strings.connectSpotify) }
+            },
+            dismissButton = { TextButton(onClick = { showManualSpDc = false }) { Text(strings.cancel) } },
+        )
     }
 
     if (showImport) {

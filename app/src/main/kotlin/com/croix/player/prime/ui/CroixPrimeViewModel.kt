@@ -21,20 +21,30 @@ import com.croix.player.prime.data.HistoryTrackEntity
 import com.croix.player.prime.data.ListeningStatsSummary
 import com.croix.player.prime.data.PlaylistTrackEntity
 import com.croix.player.prime.data.RecentSearchEntity
+import com.croix.player.prime.data.ServerSessionRepository
+import com.croix.player.prime.data.ServerSessionState
 import com.croix.player.prime.data.UserPlaylistEntity
 import com.croix.prime.design.CroixDesignRepository
 import com.croix.prime.design.CroixDesignState
 import com.croix.prime.design.PrimePresets
+import com.croix.prime.design.resolveCroixStrings
+import com.croix.prime.engine.AdBlockEngine
 import com.croix.prime.engine.AlbumDetail
 import com.croix.prime.engine.AlbumSummary
 import com.croix.prime.engine.ArtistProfile
 import com.croix.prime.engine.HomeSection
+import com.croix.prime.engine.HybridAlgorithmEngine
 import com.croix.prime.engine.InnerTubeClient
 import com.croix.prime.engine.LrclibClient
 import com.croix.prime.engine.LyricsResult
 import com.croix.prime.engine.MoodChip
 import com.croix.prime.engine.RelatedArtist
+import com.croix.prime.engine.ServerConnectionConfig
+import com.croix.prime.engine.ServerHealthStatus
 import com.croix.prime.engine.SponsorBlockClient
+import com.croix.prime.engine.SpotifyPlaylistSummary
+import com.croix.prime.engine.SpotifyTasteClient
+import com.croix.prime.engine.SpotifyTasteSnapshot
 import com.croix.prime.engine.Track
 import com.croix.prime.playback.CroixDownloadManager
 import com.croix.prime.playback.CroixPlayerController
@@ -58,8 +68,11 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     private val innerTube = InnerTubeClient()
     private val sponsorBlock = SponsorBlockClient()
     private val lrclib = LrclibClient()
+    private val spotifyClient = SpotifyTasteClient()
+    private val hybridEngine = HybridAlgorithmEngine(innerTube)
     private val dao = CroixDatabase.get(appContext).dao()
     private val designRepo = CroixDesignRepository(appContext)
+    private val serverRepo = ServerSessionRepository(appContext)
     private val imageLoader = ImageLoader(appContext)
     val downloadManager = CroixDownloadManager(appContext, innerTube)
 
@@ -68,6 +81,24 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         SharingStarted.Eagerly,
         PrimePresets.PrimeVioletGlass,
     )
+
+    val serverState: StateFlow<ServerSessionState> = serverRepo.sessionFlow.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        ServerSessionState(),
+    )
+
+    private val _serverHealth = MutableStateFlow<ServerHealthStatus?>(null)
+    val serverHealth: StateFlow<ServerHealthStatus?> = _serverHealth.asStateFlow()
+
+    private val _adsBlockedCount = MutableStateFlow(0)
+    val adsBlockedCount: StateFlow<Int> = _adsBlockedCount.asStateFlow()
+
+    private val _spotifySyncing = MutableStateFlow(false)
+    val spotifySyncing: StateFlow<Boolean> = _spotifySyncing.asStateFlow()
+
+    private val _serverNotice = MutableStateFlow<String?>(null)
+    val serverNotice: StateFlow<String?> = _serverNotice.asStateFlow()
 
     val playerController = CroixPlayerController(
         context = appContext,
@@ -184,9 +215,24 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     private var searchJob: Job? = null
 
     init {
+        observeServerConfig()
         refreshHome()
         observeCurrentTrackSideEffects()
         observeShakePreference()
+    }
+
+    private fun observeServerConfig() {
+        viewModelScope.launch {
+            var initialized = false
+            serverState.collect { session ->
+                innerTube.updateServerConfig(session.serverConfig)
+                _adsBlockedCount.value = AdBlockEngine.blockedCount.get()
+                if (!initialized) {
+                    initialized = true
+                    pingServer()
+                }
+            }
+        }
     }
 
     private fun observeShakePreference() {
@@ -253,24 +299,39 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     fun refreshHome() {
         viewModelScope.launch {
             _homeLoading.value = true
-            _homeSections.value = innerTube.fetchHomeSections()
+            val session = serverState.value
+            innerTube.updateServerConfig(session.serverConfig)
+            val ytSections = innerTube.fetchHomeSections()
+            val isSpanish = resolveCroixStrings(designState.value.languageMode).isSpanish
+            val blended = hybridEngine.buildBlendedHomeSections(
+                ytSections = ytSections,
+                spotifyTaste = session.spotifyTaste.takeIf { session.isSpotifyConnected },
+                localFavorites = favorites.value,
+                localHistory = history.value,
+                blendWeight = session.spotifyBlendWeight,
+                isSpanish = isSpanish,
+            )
+            _homeSections.value = blended
+            _adsBlockedCount.value = AdBlockEngine.blockedCount.get()
             _homeLoading.value = false
         }
     }
 
     fun startCroixFlow() {
         viewModelScope.launch {
-            val seed = favorites.value.firstOrNull()
-                ?: history.value.firstOrNull()
-                ?: _homeSections.value.firstOrNull()?.tracks?.firstOrNull()
-            if (seed != null) {
-                playerController.playTrack(seed, autoFetchRadio = true)
-            } else {
-                val hits = innerTube.searchSongs("top global music hits", limit = 15)
-                if (hits.isNotEmpty()) {
-                    playerController.playTrack(hits.first(), hits, autoFetchRadio = true)
-                }
+            val session = serverState.value
+            val fallback = _homeSections.value.firstOrNull()?.tracks.orEmpty()
+            val queue = hybridEngine.buildHybridFlowQueue(
+                spotifyTaste = session.spotifyTaste.takeIf { session.isSpotifyConnected },
+                localFavorites = favorites.value,
+                localHistory = history.value,
+                fallbackTracks = fallback,
+                blendWeight = session.spotifyBlendWeight,
+            )
+            if (queue.isNotEmpty()) {
+                playerController.playTrack(queue.first(), queue, autoFetchRadio = true)
             }
+            _adsBlockedCount.value = AdBlockEngine.blockedCount.get()
         }
     }
 
@@ -370,7 +431,16 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     fun importPlaylistUrl(url: String) {
         viewModelScope.launch {
             _importStatus.value = "..."
-            val res = innerTube.importPlaylistFromUrl(url)
+            val trimmed = url.trim()
+            val res: Result<Pair<String, List<Track>>> = if (trimmed.contains("open.spotify.com/")) {
+                spotifyClient.fetchPublicSpotifyPlaylist(trimmed).mapCatching { (title, seeds) ->
+                    val matched = hybridEngine.matchSpotifyTracksToYtMusic(seeds, maxTracks = 50)
+                    if (matched.isEmpty()) error("Could not match Spotify tracks on YouTube Music")
+                    title to matched
+                }
+            } else {
+                innerTube.importPlaylistFromUrl(trimmed)
+            }
             res.onSuccess { (title, tracks) ->
                 kotlinx.coroutines.withContext(Dispatchers.IO) {
                     val pid = dao.insertPlaylist(UserPlaylistEntity(name = title))
@@ -397,6 +467,154 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun clearImportStatus() {
         _importStatus.value = null
+    }
+
+    // === Server, Ad-Block & Spotify Algorithm Actions ===
+
+    fun updateServerConfig(transform: (ServerConnectionConfig) -> ServerConnectionConfig) {
+        viewModelScope.launch {
+            serverRepo.update { state ->
+                val updatedCfg = transform(state.serverConfig)
+                innerTube.updateServerConfig(updatedCfg)
+                state.copy(serverConfig = updatedCfg)
+            }
+            pingServer()
+        }
+    }
+
+    fun pingServer() {
+        viewModelScope.launch {
+            _serverHealth.value = innerTube.pingActiveServer()
+            _adsBlockedCount.value = AdBlockEngine.blockedCount.get()
+        }
+    }
+
+    fun connectYtMusicCookie(cookie: String) {
+        viewModelScope.launch {
+            _serverNotice.value = "..."
+            val res = innerTube.verifyYtMusicAccount(cookie)
+            res.onSuccess { accountName ->
+                serverRepo.update { s ->
+                    val cfg = s.serverConfig.copy(ytMusicCookie = cookie, ytMusicAccountName = accountName)
+                    innerTube.updateServerConfig(cfg)
+                    s.copy(serverConfig = cfg)
+                }
+                _serverNotice.value = "✓ YouTube Music: $accountName"
+                refreshHome()
+            }.onFailure { err ->
+                _serverNotice.value = "✕ ${err.message ?: "YT Music login failed"}"
+            }
+        }
+    }
+
+    fun disconnectYtMusic() {
+        viewModelScope.launch {
+            serverRepo.update { s ->
+                val cfg = s.serverConfig.copy(ytMusicCookie = "", ytMusicAccountName = "")
+                innerTube.updateServerConfig(cfg)
+                s.copy(serverConfig = cfg)
+            }
+            _serverNotice.value = null
+            refreshHome()
+        }
+    }
+
+    fun connectSpotifyCookies(spDc: String, spKey: String = "") {
+        val cleanDc = spDc.trim()
+        if (cleanDc.isBlank()) return
+        viewModelScope.launch {
+            _spotifySyncing.value = true
+            _serverNotice.value = "..."
+            spotifyClient.clearCachedToken()
+            val res = spotifyClient.syncTasteProfile(cleanDc, spKey.trim())
+            res.onSuccess { snapshot ->
+                serverRepo.update { s ->
+                    s.copy(
+                        spotifySpDc = cleanDc,
+                        spotifySpKey = spKey.trim(),
+                        spotifyTaste = snapshot,
+                    )
+                }
+                _serverNotice.value = "✓ Spotify: ${snapshot.accountName} (${snapshot.topArtists.size} artists, ${snapshot.allSeedTracks.size} tracks)"
+                refreshHome()
+            }.onFailure { err ->
+                _serverNotice.value = "✕ Spotify: ${err.message ?: "Session error"}"
+            }
+            _spotifySyncing.value = false
+        }
+    }
+
+    fun syncSpotifyTaste() {
+        val s = serverState.value
+        if (s.spotifySpDc.isBlank()) return
+        connectSpotifyCookies(s.spotifySpDc, s.spotifySpKey)
+    }
+
+    fun setSpotifyBlendWeight(weight: Float) {
+        viewModelScope.launch {
+            serverRepo.update { it.copy(spotifyBlendWeight = weight.coerceIn(0f, 1f)) }
+        }
+    }
+
+    fun disconnectSpotify() {
+        viewModelScope.launch {
+            spotifyClient.clearCachedToken()
+            serverRepo.update {
+                it.copy(
+                    spotifySpDc = "",
+                    spotifySpKey = "",
+                    spotifyTaste = SpotifyTasteSnapshot(),
+                )
+            }
+            _serverNotice.value = null
+            refreshHome()
+        }
+    }
+
+    fun importSpotifyPlaylist(playlist: SpotifyPlaylistSummary) {
+        val session = serverState.value
+        if (session.spotifySpDc.isBlank()) return
+        viewModelScope.launch {
+            _spotifySyncing.value = true
+            _serverNotice.value = "⏳ ${playlist.name}..."
+            val seedsRes = spotifyClient.fetchPlaylistTracks(
+                spDc = session.spotifySpDc,
+                spKey = session.spotifySpKey,
+                playlistId = playlist.id,
+                limit = 60,
+            )
+            seedsRes.onSuccess { seeds ->
+                val matched = hybridEngine.matchSpotifyTracksToYtMusic(seeds, maxTracks = 50)
+                if (matched.isNotEmpty()) {
+                    kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        val pid = dao.insertPlaylist(UserPlaylistEntity(name = "${playlist.name} (Spotify)"))
+                        matched.forEach { t ->
+                            dao.addTrackToPlaylist(
+                                PlaylistTrackEntity(
+                                    playlistId = pid,
+                                    trackId = t.id,
+                                    title = t.title,
+                                    artist = t.artist,
+                                    album = t.album,
+                                    durationSeconds = t.durationSeconds,
+                                    thumbnailUrl = t.thumbnailUrl,
+                                ),
+                            )
+                        }
+                    }
+                    _serverNotice.value = "✓ ${playlist.name}: ${matched.size} tracks imported"
+                } else {
+                    _serverNotice.value = "✕ No playable tracks matched for ${playlist.name}"
+                }
+            }.onFailure { err ->
+                _serverNotice.value = "✕ ${err.message ?: "Import error"}"
+            }
+            _spotifySyncing.value = false
+        }
+    }
+
+    fun clearServerNotice() {
+        _serverNotice.value = null
     }
 
     fun toggleFavorite(track: Track) {

@@ -78,6 +78,8 @@ import com.croix.player.prime.ui.screens.MiniPlayerBar
 import com.croix.player.prime.ui.screens.NowPlayingOverlay
 import com.croix.player.prime.ui.screens.SearchScreen
 import com.croix.player.prime.ui.screens.SettingsAndStudioOverlay
+import com.croix.player.prime.ui.screens.SpotifyLoginOverlay
+import com.croix.player.prime.ui.screens.YtMusicLoginOverlay
 import com.croix.prime.design.CroixAnimatedBackdrop
 import com.croix.prime.design.CroixGlassCard
 import com.croix.prime.design.CroixNavDestination
@@ -134,10 +136,17 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val artistLoading by vm.artistLoading.collectAsState()
     val albumDetail by vm.albumDetail.collectAsState()
     val albumLoading by vm.albumLoading.collectAsState()
+    val serverState by vm.serverState.collectAsState()
+    val serverHealth by vm.serverHealth.collectAsState()
+    val adsBlockedCount by vm.adsBlockedCount.collectAsState()
+    val spotifySyncing by vm.spotifySyncing.collectAsState()
+    val serverNotice by vm.serverNotice.collectAsState()
 
     var currentRoute by remember { mutableStateOf("home") }
     var playerExpanded by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var spotifyLoginOpen by remember { mutableStateOf(false) }
+    var ytMusicLoginOpen by remember { mutableStateOf(false) }
     var trackForMenu by remember { mutableStateOf<Track?>(null) }
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var quickNewPlaylistName by remember { mutableStateOf("") }
@@ -430,6 +439,11 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 BackHandler { settingsOpen = false }
                 SettingsAndStudioOverlay(
                     playback = playback,
+                    serverState = serverState,
+                    serverHealth = serverHealth,
+                    adsBlockedCount = adsBlockedCount,
+                    spotifySyncing = spotifySyncing,
+                    serverNotice = serverNotice,
                     onClose = { settingsOpen = false },
                     onUpdateDesign = vm::updateDesign,
                     onApplyPreset = vm::applyPreset,
@@ -441,6 +455,53 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onSetEqBand = vm.playerController::setEqBand,
                     onSetBassBoost = vm.playerController::setBassBoost,
                     onSetLoudness = vm.playerController::setLoudnessGain,
+                    onUpdateServerConfig = vm::updateServerConfig,
+                    onPingServer = vm::pingServer,
+                    onOpenYtMusicLogin = { ytMusicLoginOpen = true },
+                    onDisconnectYtMusic = vm::disconnectYtMusic,
+                    onOpenSpotifyLogin = { spotifyLoginOpen = true },
+                    onConnectSpotifyManual = { dc -> vm.connectSpotifyCookies(dc) },
+                    onSyncSpotifyNow = vm::syncSpotifyTaste,
+                    onSetSpotifyBlendWeight = vm::setSpotifyBlendWeight,
+                    onApplyAlgorithmBlend = {
+                        vm.refreshHome()
+                        settingsOpen = false
+                        currentRoute = "home"
+                    },
+                    onDisconnectSpotify = vm::disconnectSpotify,
+                    onImportSpotifyPlaylist = vm::importSpotifyPlaylist,
+                )
+            }
+
+            // In-App Spotify Login WebView (captures sp_dc / sp_key cleanly for hybrid algorithm)
+            AnimatedVisibility(
+                visible = spotifyLoginOpen,
+                enter = fadeIn(tween(220)) + slideInVertically(tween(280)) { it / 3 },
+                exit = fadeOut(tween(180)) + slideOutVertically(tween(220)) { it / 3 },
+                modifier = Modifier.zIndex(20f),
+            ) {
+                SpotifyLoginOverlay(
+                    onDismiss = { spotifyLoginOpen = false },
+                    onCookiesCaptured = { spDc, spKey ->
+                        spotifyLoginOpen = false
+                        vm.connectSpotifyCookies(spDc, spKey)
+                    },
+                )
+            }
+
+            // In-App YouTube Music Account Login WebView (captures SAPISID for personalized ad-free feeds)
+            AnimatedVisibility(
+                visible = ytMusicLoginOpen,
+                enter = fadeIn(tween(220)) + slideInVertically(tween(280)) { it / 3 },
+                exit = fadeOut(tween(180)) + slideOutVertically(tween(220)) { it / 3 },
+                modifier = Modifier.zIndex(20f),
+            ) {
+                YtMusicLoginOverlay(
+                    onDismiss = { ytMusicLoginOpen = false },
+                    onCookieCaptured = { cookie ->
+                        ytMusicLoginOpen = false
+                        vm.connectYtMusicCookie(cookie)
+                    },
                 )
             }
         }

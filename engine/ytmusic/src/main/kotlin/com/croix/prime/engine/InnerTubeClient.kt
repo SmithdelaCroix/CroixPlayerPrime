@@ -7,6 +7,7 @@ package com.croix.prime.engine
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -60,6 +61,72 @@ class InnerTubeClient(
     }
 
     private val streamCache = ConcurrentHashMap<String, ResolvedStream>()
+
+    @Volatile
+    var serverConfig: ServerConnectionConfig = ServerConnectionConfig()
+
+    fun updateServerConfig(config: ServerConnectionConfig) {
+        val modeChanged = serverConfig.mode != config.mode || serverConfig.activeRelayUrl != config.activeRelayUrl
+        serverConfig = config
+        if (modeChanged) streamCache.clear()
+    }
+
+    suspend fun pingActiveServer(): ServerHealthStatus = withContext(Dispatchers.IO) {
+        val cfg = serverConfig
+        val targetUrl = when (cfg.mode) {
+            YtMusicServerMode.DIRECT_ADFREE -> "https://music.youtube.com/generate_204"
+            YtMusicServerMode.PIPED_RELAY, YtMusicServerMode.CUSTOM_INSTANCE -> {
+                val base = cfg.activeRelayUrl.ifBlank { "https://music.youtube.com" }
+                if (base.contains("music.youtube.com")) "$base/generate_204" else "$base/trending?region=US"
+            }
+        }
+        val label = cfg.activeRelayUrl.removePrefix("https://").removePrefix("http://").ifBlank { "music.youtube.com" }
+        val start = System.currentTimeMillis()
+        runCatching {
+            val resp = http.get(targetUrl) {
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            }
+            val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)
+            val ok = resp.status.value in 200..399
+            ServerHealthStatus(
+                reachable = ok,
+                latencyMs = elapsed,
+                endpointLabel = label,
+                message = if (ok) "HTTP ${resp.status.value}" else "HTTP ${resp.status.value}",
+            )
+        }.getOrElse { err ->
+            ServerHealthStatus(
+                reachable = false,
+                latencyMs = -1L,
+                endpointLabel = label,
+                message = err.message ?: "Unreachable",
+            )
+        }
+    }
+
+    suspend fun verifyYtMusicAccount(cookie: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val auth = SapisidAuthSigner.buildAuthHeader(cookie)
+                ?: error("Missing SAPISID session cookie")
+            val payload = buildWebRemixContext {}
+            val respText = http.post("https://music.youtube.com/youtubei/v1/account/account_menu?prettyPrint=false") {
+                contentType(ContentType.Application.Json)
+                header("Origin", "https://music.youtube.com")
+                header("Referer", "https://music.youtube.com/")
+                header("Authorization", auth)
+                header("Cookie", cookie)
+                header("X-Origin", "https://music.youtube.com")
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
+                setBody(payload.toString())
+            }.bodyAsText()
+            val root = json.parseToJsonElement(respText).jsonObject
+            val header = findFirstObjectByKey(root, "activeAccountHeaderRenderer")
+            val accountName = header?.get("accountName")?.let(::extractColumnText).orEmpty().ifBlank {
+                header?.get("channelHandle")?.let(::extractColumnText).orEmpty()
+            }.ifBlank { "YouTube Music Account" }
+            accountName
+        }
+    }
 
     init {
         ensureNewPipeInit(okHttp)
@@ -456,7 +523,17 @@ class InnerTubeClient(
             return@withContext Result.success(it)
         }
 
-        // Strategy 1: Direct InnerTube ANDROID_VR client (returns direct un-throttled audio URLs without signature cipher)
+        val cfg = serverConfig
+        // Strategy 0: Optional Piped Relay / Custom Server when configured by the user
+        if (cfg.mode != YtMusicServerMode.DIRECT_ADFREE && cfg.activeRelayUrl.startsWith("http")) {
+            val relayStream = runCatching { fetchPipedAudioStream(cfg.activeRelayUrl, videoId) }.getOrNull()
+            if (relayStream != null) {
+                streamCache[videoId] = relayStream
+                return@withContext Result.success(relayStream)
+            }
+        }
+
+        // Strategy 1: Direct InnerTube ANDROID_VR client (ad-free direct audio URLs without signature cipher)
         val vrStream = runCatching { fetchDirectPlayerStream(videoId, clientName = "ANDROID_VR", clientVersion = "1.60.19") }.getOrNull()
         if (vrStream != null) {
             streamCache[videoId] = vrStream
@@ -476,7 +553,7 @@ class InnerTubeClient(
             val extractor = ServiceList.YouTube.getStreamExtractor(url)
             extractor.fetchPage()
             val best = extractor.audioStreams
-                .filter { !it.content.isNullOrBlank() }
+                .filter { !it.content.isNullOrBlank() && (!cfg.strictAdBlockEnabled || !AdBlockEngine.isAdTrackingStreamUrl(it.content)) }
                 .maxByOrNull { it.averageBitrate }
                 ?: error("No playable audio stream found for $videoId")
             ResolvedStream(
@@ -485,6 +562,28 @@ class InnerTubeClient(
                 bitrate = best.averageBitrate,
             ).also { streamCache[videoId] = it }
         }
+    }
+
+    private suspend fun fetchPipedAudioStream(baseUrl: String, videoId: String): ResolvedStream? {
+        val respText = http.get("$baseUrl/streams/$videoId") {
+            header("User-Agent", "CroixPlayerPrime/2.5 (Android 12+)")
+            header("Accept", "application/json")
+        }.bodyAsText()
+        val root = json.parseToJsonElement(respText).jsonObject
+        val audioStreams = root["audioStreams"]?.jsonArray ?: return null
+        val best = audioStreams
+            .mapNotNull { it as? JsonObject }
+            .filter { obj ->
+                val u = obj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                u.startsWith("http") && (!serverConfig.strictAdBlockEnabled || !AdBlockEngine.isAdTrackingStreamUrl(u))
+            }
+            .maxByOrNull { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 }
+            ?: return null
+        return ResolvedStream(
+            url = best["url"]!!.jsonPrimitive.content,
+            mimeType = best["mimeType"]?.jsonPrimitive?.contentOrNull ?: "audio/mp4",
+            bitrate = best["bitrate"]?.jsonPrimitive?.intOrNull ?: 128_000,
+        )
     }
 
     private suspend fun fetchDirectPlayerStream(
@@ -521,6 +620,9 @@ class InnerTubeClient(
         }.bodyAsText()
 
         val root = json.parseToJsonElement(responseText).jsonObject
+        if (serverConfig.strictAdBlockEnabled) {
+            AdBlockEngine.countAndStripPlayerAds(root)
+        }
         val streamingData = root["streamingData"]?.jsonObject ?: return null
         val adaptive = streamingData["adaptiveFormats"]?.jsonArray ?: return null
 
@@ -529,7 +631,9 @@ class InnerTubeClient(
             .filter { fmt ->
                 val mime = fmt["mimeType"]?.jsonPrimitive?.contentOrNull.orEmpty()
                 val directUrl = fmt["url"]?.jsonPrimitive?.contentOrNull
-                mime.startsWith("audio/") && !directUrl.isNullOrBlank()
+                mime.startsWith("audio/") &&
+                    !directUrl.isNullOrBlank() &&
+                    (!serverConfig.strictAdBlockEnabled || !AdBlockEngine.isAdTrackingStreamUrl(directUrl))
             }
             .maxByOrNull { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 }
             ?: return null
@@ -542,10 +646,21 @@ class InnerTubeClient(
     }
 
     private suspend fun postInnerTube(endpoint: String, body: JsonObject): String {
+        val cfg = serverConfig
+        val authHeader = if (cfg.hasYtMusicAccount) {
+            SapisidAuthSigner.buildAuthHeader(cfg.ytMusicCookie)
+        } else {
+            null
+        }
         return http.post("https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false") {
             contentType(ContentType.Application.Json)
             header("Origin", "https://music.youtube.com")
             header("Referer", "https://music.youtube.com/")
+            header("X-Origin", "https://music.youtube.com")
+            if (authHeader != null) {
+                header("Authorization", authHeader)
+                header("Cookie", cfg.ytMusicCookie)
+            }
             header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
             setBody(body.toString())
         }.bodyAsText()
@@ -565,9 +680,11 @@ class InnerTubeClient(
         }
 
     private fun parseHomeShelves(root: JsonObject, out: MutableList<HomeSection>) {
+        val blockAds = serverConfig.strictAdBlockEnabled
         fun walk(el: JsonElement) {
             when (el) {
                 is JsonObject -> {
+                    if (blockAds && AdBlockEngine.isAdOrPromotedNode(el)) return
                     val shelf = el["musicCarouselShelfRenderer"]?.jsonObject
                     if (shelf != null) {
                         val title = shelf["header"]?.jsonObject
@@ -577,9 +694,11 @@ class InnerTubeClient(
                             ?.firstOrNull()?.jsonObject
                             ?.get("text")?.jsonPrimitive?.contentOrNull
                             ?: "For You"
-                        val tracks = extractTracksFromTree(shelf).distinctBy { it.id }
-                        if (tracks.isNotEmpty()) {
-                            out += HomeSection(title = title, tracks = tracks)
+                        if (!blockAds || !AdBlockEngine.isSponsoredShelfTitle(title)) {
+                            val tracks = extractTracksFromTree(shelf).distinctBy { it.id }
+                            if (tracks.isNotEmpty()) {
+                                out += HomeSection(title = title, tracks = tracks)
+                            }
                         }
                     }
                     el.values.forEach { walk(it) }
@@ -592,15 +711,21 @@ class InnerTubeClient(
     }
 
     private fun extractTracksFromTree(element: JsonElement): List<Track> {
+        val blockAds = serverConfig.strictAdBlockEnabled
         val result = mutableListOf<Track>()
         fun walk(el: JsonElement) {
             when (el) {
                 is JsonObject -> {
+                    if (blockAds && AdBlockEngine.isAdOrPromotedNode(el)) return
                     el["musicResponsiveListItemRenderer"]?.jsonObject?.let { item ->
-                        parseListItem(item)?.let(result::add)
+                        if (!blockAds || !AdBlockEngine.isAdOrPromotedNode(item)) {
+                            parseListItem(item)?.let(result::add)
+                        }
                     }
                     el["musicTwoRowItemRenderer"]?.jsonObject?.let { item ->
-                        parseTwoRowItem(item)?.let(result::add)
+                        if (!blockAds || !AdBlockEngine.isAdOrPromotedNode(item)) {
+                            parseTwoRowItem(item)?.let(result::add)
+                        }
                     }
                     el.values.forEach { walk(it) }
                 }

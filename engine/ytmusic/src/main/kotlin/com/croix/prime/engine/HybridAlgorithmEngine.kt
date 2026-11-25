@@ -71,7 +71,7 @@ class HybridAlgorithmEngine(
             // Fetch YT Music related discovery from top Spotify match + local favorite
             val radioSeed = matchedSpotify.firstOrNull() ?: localFavorites.firstOrNull() ?: localHistory.firstOrNull()
             val ytDiscovery = if (radioSeed != null) {
-                innerTube.fetchUpNextRadio(radioSeed.id, limit = 10)
+                innerTube.fetchRadioQueue(radioSeed.id, limit = 10)
             } else {
                 emptyList()
             }
@@ -115,7 +115,7 @@ class HybridAlgorithmEngine(
         } else if (localFavorites.isNotEmpty() || localHistory.isNotEmpty()) {
             val seed = (localFavorites + localHistory).shuffled().firstOrNull()
             if (seed != null) {
-                val radio = innerTube.fetchUpNextRadio(seed.id, limit = 12)
+                val radio = innerTube.fetchRadioQueue(seed.id, limit = 12)
                 if (radio.isNotEmpty()) {
                     val title = if (isSpanish) "Recomendado para ti • ${seed.artist}" else "Picked for you • ${seed.artist}"
                     customSections += HomeSection(title = title, tracks = radio)
@@ -163,7 +163,7 @@ class HybridAlgorithmEngine(
             ?: fallbackTracks.firstOrNull()
 
         val radio = if (anchor != null) {
-            innerTube.fetchUpNextRadio(anchor.id, limit = 18)
+            innerTube.fetchRadioQueue(anchor.id, limit = 18)
         } else {
             innerTube.searchSongs("top global music hits", limit = 15)
         }

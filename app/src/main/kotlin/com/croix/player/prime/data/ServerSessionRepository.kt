@@ -11,9 +11,11 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.croix.prime.engine.AiApiConfig
 import com.croix.prime.engine.ExternalIntegrationsConfig
 import com.croix.prime.engine.ServerConnectionConfig
 import com.croix.prime.engine.SpotifyTasteSnapshot
+import com.croix.prime.engine.YtMusicPlaylistSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
@@ -30,6 +32,9 @@ data class ServerSessionState(
     val spotifyTaste: SpotifyTasteSnapshot = SpotifyTasteSnapshot(),
     val spotifyBlendWeight: Float = 0.55f,
     val integrations: ExternalIntegrationsConfig = ExternalIntegrationsConfig(),
+    val aiConfig: AiApiConfig = AiApiConfig(),
+    val ytMusicPlaylists: List<YtMusicPlaylistSummary> = emptyList(),
+    val ytMusicSyncSummary: String = "",
 ) {
     val isSpotifyConnected: Boolean get() = spotifySpDc.isNotBlank() && spotifyTaste.connected
     val isYtMusicConnected: Boolean get() = serverConfig.hasYtMusicAccount

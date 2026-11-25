@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -143,12 +144,14 @@ fun CroixPrimeTheme(
     }
     val targetBg = when {
         safeDesign.pureBlackBackground || safeDesign.colorMode == PrimeColorMode.AMOLED_BLACK -> Color.Black
+        safeDesign.colorMode == PrimeColorMode.ALBUM_MORPH && albumSeedPrimary != null ->
+            lerp(Color(0xFF0A0910), albumSeedPrimary, 0.22f)
         else -> Color(0xFF0A0910)
     }
 
-    val primary by animateColorAsState(targetPrimary, tween(450), label = "primary")
-    val secondary by animateColorAsState(targetSecondary, tween(450), label = "secondary")
-    val bg by animateColorAsState(targetBg, tween(450), label = "bg")
+    val primary by animateColorAsState(targetPrimary, tween(700), label = "primary")
+    val secondary by animateColorAsState(targetSecondary, tween(700), label = "secondary")
+    val bg by animateColorAsState(targetBg, tween(700), label = "bg")
 
     val resolved = androidx.compose.runtime.remember(primary, secondary, bg, safeDesign.glassOpacity, safeDesign.borderGlowAlpha) {
         CroixResolvedPalette(
@@ -206,7 +209,11 @@ fun CroixAnimatedBackdrop(
 ) {
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
-    val glow = design.ambientGlowStrength
+    val glow = if (design.colorMode == PrimeColorMode.ALBUM_MORPH) {
+        design.ambientGlowStrength.coerceAtLeast(0.68f)
+    } else {
+        design.ambientGlowStrength
+    }
 
     val phaseState = if (design.backdropMotionEnabled && glow > 0.02f) {
         val transition = rememberInfiniteTransition(label = "backdrop_orbs")

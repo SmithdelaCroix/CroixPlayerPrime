@@ -61,7 +61,9 @@ import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Storage
@@ -124,11 +126,14 @@ import com.croix.prime.design.PrimePresets
 import com.croix.prime.design.PrimeProgressStyle
 import com.croix.prime.design.PrimeTransitionStyle
 import com.croix.prime.design.PrimeVisualizerStyle
+import com.croix.prime.engine.AiApiConfig
+import com.croix.prime.engine.AiProviderMode
 import com.croix.prime.engine.ExternalIntegrationsConfig
 import com.croix.prime.engine.ServerConnectionConfig
 import com.croix.prime.engine.ServerHealthStatus
 import com.croix.prime.engine.ServerPresets
 import com.croix.prime.engine.SpotifyPlaylistSummary
+import com.croix.prime.engine.YtMusicPlaylistSummary
 import com.croix.prime.engine.YtMusicServerMode
 import com.croix.prime.playback.AutoEqHeadphoneProfile
 import com.croix.prime.playback.EqPreset
@@ -140,6 +145,7 @@ private enum class SettingsPage {
     HOME,
     SERVERS,
     SPOTIFY,
+    AI_INTEGRATION,
     INTEGRATIONS,
     PRIVACY_BLOCKED,
     STUDIO,
@@ -147,6 +153,7 @@ private enum class SettingsPage {
     AUDIO_ENGINE,
     EQUALIZER,
     CACHE_STORAGE,
+    BETA_LABS,
     GESTURES,
     SPONSORBLOCK,
     UPDATES,
@@ -170,6 +177,7 @@ fun SettingsAndStudioOverlay(
     serverHealth: ServerHealthStatus?,
     adsBlockedCount: Int,
     spotifySyncing: Boolean,
+    ytMusicSyncing: Boolean,
     serverNotice: String?,
     updateInfo: AppUpdateInfo,
     audioCacheBytes: Long,
@@ -181,6 +189,8 @@ fun SettingsAndStudioOverlay(
     onSetSpeed: (Float) -> Unit,
     onSetPitch: (Float) -> Unit,
     onSetSkipSilence: (Boolean) -> Unit,
+    onSetKaraokeEnabled: (Boolean) -> Unit,
+    onSetKaraokeStrength: (Float) -> Unit,
     onSetAudio8dEnabled: (Boolean) -> Unit,
     onSetAudio8dSpeed: (Float) -> Unit,
     onSetReverbMode: (ReverbPresetMode) -> Unit,
@@ -195,9 +205,13 @@ fun SettingsAndStudioOverlay(
     onUnblockArtist: (String) -> Unit,
     onUpdateIntegrations: ((ExternalIntegrationsConfig) -> ExternalIntegrationsConfig) -> Unit,
     onLoginLastFm: (String, String, String, String) -> Unit,
+    onUpdateAiConfig: ((AiApiConfig) -> AiApiConfig) -> Unit,
+    onTestAiConnection: () -> Unit,
     onUpdateServerConfig: ((ServerConnectionConfig) -> ServerConnectionConfig) -> Unit,
     onPingServer: () -> Unit,
     onOpenYtMusicLogin: () -> Unit,
+    onSyncYtMusicNow: () -> Unit,
+    onImportYtMusicPlaylist: (YtMusicPlaylistSummary) -> Unit,
     onDisconnectYtMusic: () -> Unit,
     onOpenSpotifyLogin: () -> Unit,
     onConnectSpotifyManual: (String) -> Unit,
@@ -275,15 +289,17 @@ fun SettingsAndStudioOverlay(
                 Column {
                     val pageTitle = when (page) {
                         SettingsPage.HOME -> if (es) "Configuración" else "Settings"
-                        SettingsPage.SERVERS -> if (es) "Servidores y Ad-Block" else "Servers & Ad-Block"
+                        SettingsPage.SERVERS -> if (es) "Cuenta YT Music y Servidores" else "YT Music Account & Servers"
                         SettingsPage.SPOTIFY -> if (es) "Algoritmo Spotify" else "Spotify Algorithm"
+                        SettingsPage.AI_INTEGRATION -> if (es) "Integración IA (API)" else "AI Integration (API)"
                         SettingsPage.INTEGRATIONS -> if (es) "Discord y Scrobbling" else "Discord & Scrobbling"
                         SettingsPage.PRIVACY_BLOCKED -> if (es) "Privacidad y Bloqueos" else "Privacy & Blocked"
                         SettingsPage.STUDIO -> if (es) "Estudio de Apariencia" else "Appearance Studio"
                         SettingsPage.LYRICS_UI -> if (es) "Letras y Visualizador" else "Lyrics & Visualizer"
                         SettingsPage.AUDIO_ENGINE -> if (es) "Reproductor y Audio" else "Player & Audio"
-                        SettingsPage.EQUALIZER -> if (es) "Audio 8D, Reverb y AutoEq" else "8D Audio, Reverb & AutoEq"
+                        SettingsPage.EQUALIZER -> if (es) "Karaoke, Audio 8D y AutoEq" else "Karaoke, 8D Audio & AutoEq"
                         SettingsPage.CACHE_STORAGE -> if (es) "Caché Inteligente de Audio" else "Smart Audio Cache"
+                        SettingsPage.BETA_LABS -> if (es) "Funciones BETA" else "BETA Labs"
                         SettingsPage.GESTURES -> if (es) "Gestos y Hardware" else "Gestures & Hardware"
                         SettingsPage.SPONSORBLOCK -> "SponsorBlock"
                         SettingsPage.UPDATES -> if (es) "Actualizaciones" else "Updates"
@@ -401,6 +417,18 @@ fun SettingsAndStudioOverlay(
                                             onClick = { page = SettingsPage.SPOTIFY },
                                         ),
                                         SegmentedEntry(
+                                            icon = Icons.Rounded.Psychology,
+                                            title = if (es) "Integración IA (Letras y Recomendador)" else "AI Integration (Lyrics & Curator)",
+                                            subtitle = if (serverState.aiConfig.isReady) {
+                                                "${serverState.aiConfig.provider.label} • ${serverState.aiConfig.effectiveModel}"
+                                            } else {
+                                                if (es) "Conecta tu API de Gemini u OpenAI para traducir y recomendar" else "Connect Gemini or OpenAI API for smart lyrics & picks"
+                                            },
+                                            accent = Color(0xFFB388FF),
+                                            badge = if (serverState.aiConfig.isReady) "IA On" else null,
+                                            onClick = { page = SettingsPage.AI_INTEGRATION },
+                                        ),
+                                        SegmentedEntry(
                                             icon = Icons.Rounded.Hub,
                                             title = if (es) "Discord RPC, Last.fm y ListenBrainz" else "Discord RPC, Last.fm & ListenBrainz",
                                             subtitle = buildString {
@@ -512,8 +540,20 @@ fun SettingsAndStudioOverlay(
                             // Group 4: Comportamiento y Sistema
                             item {
                                 SegmentedSettingsGroup(
-                                    header = if (es) "COMPORTAMIENTO Y SISTEMA" else "BEHAVIOR & SYSTEM",
+                                    header = if (es) "COMPORTAMIENTO, BETA Y SISTEMA" else "BEHAVIOR, BETA & SYSTEM",
                                     items = listOf(
+                                        SegmentedEntry(
+                                            icon = Icons.Rounded.Science,
+                                            title = if (es) "Funciones BETA (Parallax 3D Giroscopio)" else "BETA Labs (3D Gyro Parallax)",
+                                            subtitle = if (design.artworkParallax3d) {
+                                                if (es) "Parallax 3D Giroscopio ACTIVO • Intensidad ${"%.1f".format(design.parallax3dIntensity)}x" else "3D Gyro Parallax ON"
+                                            } else {
+                                                if (es) "Activa y prueba funciones experimentales en tiempo real" else "Enable and test experimental features live"
+                                            },
+                                            accent = Color(0xFF00E5FF),
+                                            badge = "BETA",
+                                            onClick = { page = SettingsPage.BETA_LABS },
+                                        ),
                                         SegmentedEntry(
                                             icon = Icons.Rounded.TouchApp,
                                             title = if (es) "Gestos y Hardware" else "Gestures & Hardware",
@@ -679,17 +719,54 @@ fun SettingsAndStudioOverlay(
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
-                                                Text("Cuenta YouTube Music", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                                Text("Cuenta Real YouTube Music", color = Color.White, fontWeight = FontWeight.SemiBold)
                                                 Text(
                                                     if (serverState.isYtMusicConnected) "${strings.connectedAs}: ${cfg.ytMusicAccountName}" else strings.notConnected,
                                                     color = if (serverState.isYtMusicConnected) Color(0xFF00E676) else palette.textSecondary,
                                                     style = MaterialTheme.typography.bodySmall,
                                                 )
+                                                if (serverState.ytMusicSyncSummary.isNotBlank()) {
+                                                    Text(serverState.ytMusicSyncSummary, color = palette.secondary, style = MaterialTheme.typography.labelSmall)
+                                                }
                                             }
                                             if (serverState.isYtMusicConnected) {
                                                 OutlinedButton(onClick = onDisconnectYtMusic) { Text(strings.disconnect) }
                                             } else {
                                                 Button(onClick = onOpenYtMusicLogin) { Text(if (es) "Conectar" else "Connect") }
+                                            }
+                                        }
+
+                                        if (serverState.isYtMusicConnected) {
+                                            Button(
+                                                enabled = !ytMusicSyncing,
+                                                onClick = onSyncYtMusicNow,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                if (ytMusicSyncing) {
+                                                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                                                    Spacer(Modifier.width(8.dp))
+                                                }
+                                                Text(if (es) "Sincronizar Me gusta, Historial y Playlists de YT Music" else "Sync Real YT Music Library")
+                                            }
+                                            if (serverState.ytMusicPlaylists.isNotEmpty()) {
+                                                Text(if (es) "Tus Playlists reales de YouTube Music" else "Your YT Music Playlists", color = palette.primary, fontWeight = FontWeight.Bold)
+                                                serverState.ytMusicPlaylists.take(12).forEach { pl ->
+                                                    CroixGlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 12.dp) {
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                        ) {
+                                                            Column(modifier = Modifier.weight(1f)) {
+                                                                Text(pl.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                                if (pl.subtitle.isNotBlank()) {
+                                                                    Text(pl.subtitle, color = palette.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                                                }
+                                                            }
+                                                            TextButton(onClick = { onImportYtMusicPlaylist(pl) }) { Text("Importar") }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -910,6 +987,26 @@ fun SettingsAndStudioOverlay(
                                                 }
                                             }
                                             1 -> {
+                                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary, cornerRadius = 16.dp) {
+                                                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                        StudioSwitch(
+                                                            if (es) "Color dinámico según la canción actual" else "Dynamic Color from Playing Track",
+                                                            design.colorMode == PrimeColorMode.ALBUM_MORPH,
+                                                        ) { enabled ->
+                                                            onUpdateDesign {
+                                                                it.copy(
+                                                                    colorMode = if (enabled) PrimeColorMode.ALBUM_MORPH else PrimeColorMode.VIOLET_GLASS,
+                                                                    pureBlackBackground = false,
+                                                                )
+                                                            }
+                                                        }
+                                                        Text(
+                                                            if (es) "Cambia toda la app suavemente al color dominante de la música que estás reproduciendo." else "Smoothly morphs the whole app to the current song's cover art colors.",
+                                                            color = palette.textSecondary,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                        )
+                                                    }
+                                                }
                                                 Text(if (es) "Modo de Relleno" else "Color Fill Mode", color = Color.White, fontWeight = FontWeight.Bold)
                                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                                                     CroixGlassCard(
@@ -1018,8 +1115,13 @@ fun SettingsAndStudioOverlay(
                                                 StudioSwitch(if (es) "Fondo Canvas Animado en Reproductor" else "Animated Canvas Backdrop", design.canvasMotionEnabled) { v ->
                                                     onUpdateDesign { it.copy(canvasMotionEnabled = v) }
                                                 }
-                                                StudioSwitch(if (es) "Carátula 3D Parallax (Giroscopio)" else "3D Gyroscope Artwork Parallax", design.artworkParallax3d) { v ->
+                                                StudioSwitch(if (es) "Carátula 3D Parallax Giroscopio [BETA]" else "3D Gyroscope Parallax [BETA]", design.artworkParallax3d) { v ->
                                                     onUpdateDesign { it.copy(artworkParallax3d = v) }
+                                                }
+                                                if (design.artworkParallax3d) {
+                                                    StudioSlider(if (es) "Intensidad 3D Parallax [BETA]" else "3D Parallax Intensity", design.parallax3dIntensity, 0.5f..2.2f, "${"%.1f".format(design.parallax3dIntensity)}x") { v ->
+                                                        onUpdateDesign { it.copy(parallax3dIntensity = v) }
+                                                    }
                                                 }
                                                 StudioSlider(if (es) "Opacidad del Panel de Controles" else "Control Dock Opacity", design.playerControlDockOpacity, 0.05f..0.80f, "${(design.playerControlDockOpacity * 100).roundToInt()}%") { v ->
                                                     onUpdateDesign { it.copy(playerControlDockOpacity = v) }
@@ -1200,7 +1302,11 @@ fun SettingsAndStudioOverlay(
                             item {
                                 CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary) {
                                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        Text(if (es) "Audio Espacial 8D y Reverb" else "8D Spatial Audio & Reverb", color = palette.primary, fontWeight = FontWeight.Bold)
+                                        Text(if (es) "Karaoke, Audio Espacial 8D y Reverb" else "Karaoke, 8D Spatial Audio & Reverb", color = palette.primary, fontWeight = FontWeight.Bold)
+                                        StudioSwitch(if (es) "Modo Karaoke (Reducir voz principal)" else "Karaoke Vocal Remover", playback.karaokeEnabled, onSetKaraokeEnabled)
+                                        if (playback.karaokeEnabled) {
+                                            StudioSlider(if (es) "Reducción de Voz Karaoke" else "Vocal Reduction", playback.karaokeStrength, 0.3f..1.0f, "${(playback.karaokeStrength * 100).roundToInt()}%", onSetKaraokeStrength)
+                                        }
                                         StudioSwitch(if (es) "Activar Audio Espacial 8D (Estéreo Orbital)" else "Enable 8D Spatial Audio", playback.audio8dEnabled, onSetAudio8dEnabled)
                                         if (playback.audio8dEnabled) {
                                             StudioSlider(if (es) "Velocidad de Órbita 8D" else "8D Orbit Speed", playback.audio8dSpeed, 0.1f..1.0f, "${(playback.audio8dSpeed * 100).roundToInt()}%", onSetAudio8dSpeed)
@@ -1312,6 +1418,194 @@ fun SettingsAndStudioOverlay(
                                             Icon(Icons.Rounded.DeleteSweep, null, modifier = Modifier.size(18.dp))
                                             Spacer(Modifier.width(8.dp))
                                             Text(if (es) "Vaciar Caché de Audio" else "Clear Audio Cache")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================
+                        // SUBMENU: AI INTEGRATION (GEMINI / OPENAI API)
+                        // =========================================================
+                        SettingsPage.AI_INTEGRATION -> {
+                            val ai = serverState.aiConfig
+                            if (serverNotice != null) {
+                                item {
+                                    CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFB388FF)) {
+                                        Text(serverNotice, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(14.dp))
+                                    }
+                                }
+                            }
+                            item {
+                                var keyDraft by remember(ai.apiKey) { mutableStateOf(ai.apiKey) }
+                                var modelDraft by remember(ai.model) { mutableStateOf(ai.model) }
+                                var baseDraft by remember(ai.customBaseUrl) { mutableStateOf(ai.customBaseUrl) }
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFB388FF)) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text(if (es) "Integración con IA (API)" else "AI API Integration", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            if (es) "Usa tu API Key de Google Gemini (gratis en AI Studio) u OpenAI/OpenRouter/Groq para:\n• Traducir letras con contexto musical y poético.\n• Recomendar canciones personalizadas según tu historial en Inicio." else "Connect Gemini or OpenAI-compatible API for natural lyric translation and history-aware music curation.",
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        StudioSwitch(if (es) "Activar funciones con IA" else "Enable AI Features", ai.enabled) { en ->
+                                            onUpdateAiConfig { it.copy(enabled = en) }
+                                        }
+                                        StudioEnumRow(
+                                            title = if (es) "Proveedor de IA" else "AI Provider",
+                                            entries = AiProviderMode.entries,
+                                            selected = ai.provider,
+                                            labelOf = { it.label },
+                                        ) { prov ->
+                                            modelDraft = prov.defaultModel
+                                            onUpdateAiConfig { it.copy(provider = prov, model = prov.defaultModel) }
+                                        }
+                                        OutlinedTextField(
+                                            value = keyDraft,
+                                            onValueChange = { keyDraft = it },
+                                            label = { Text("API Key") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                        OutlinedTextField(
+                                            value = modelDraft,
+                                            onValueChange = { modelDraft = it },
+                                            label = { Text("Modelo (ej: ${ai.provider.defaultModel})") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                        if (ai.provider == AiProviderMode.OPENAI_COMPAT) {
+                                            OutlinedTextField(
+                                                value = baseDraft,
+                                                onValueChange = { baseDraft = it },
+                                                label = { Text("URL Base opcional (ej: https://api.groq.com/openai/v1)") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                            Button(
+                                                onClick = {
+                                                    onUpdateAiConfig {
+                                                        it.copy(
+                                                            enabled = keyDraft.isNotBlank(),
+                                                            apiKey = keyDraft.trim(),
+                                                            model = modelDraft.trim().ifBlank { it.provider.defaultModel },
+                                                            customBaseUrl = baseDraft.trim(),
+                                                        )
+                                                    }
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                            ) { Text(if (es) "Guardar IA" else "Save AI") }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    onUpdateAiConfig {
+                                                        it.copy(
+                                                            enabled = keyDraft.isNotBlank(),
+                                                            apiKey = keyDraft.trim(),
+                                                            model = modelDraft.trim().ifBlank { it.provider.defaultModel },
+                                                            customBaseUrl = baseDraft.trim(),
+                                                        )
+                                                    }
+                                                    onTestAiConnection()
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                            ) { Text(if (es) "Probar API" else "Test API") }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================
+                        // SUBMENU: BETA LABS (LIVE 3D GYRO PARALLAX TESTER!)
+                        // =========================================================
+                        SettingsPage.BETA_LABS -> {
+                            item {
+                                val liveTilt by rememberParallaxTiltState(
+                                    enabled = design.artworkParallax3d,
+                                    intensity = design.parallax3dIntensity,
+                                )
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFF00E5FF)) {
+                                    Column(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text("LABORATORIO BETA", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(50.dp))
+                                                    .background(Color(0xFF00E5FF).copy(alpha = 0.22f))
+                                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                            ) {
+                                                Text("EXPERIMENTAL", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        }
+
+                                        StudioSwitch(
+                                            if (es) "Carátula 3D Parallax con Giroscopio [BETA]" else "3D Gyroscope Artwork Parallax [BETA]",
+                                            design.artworkParallax3d,
+                                        ) { v ->
+                                            onUpdateDesign { it.copy(artworkParallax3d = v) }
+                                        }
+
+                                        StudioSlider(
+                                            label = if (es) "Intensidad de inclinación 3D" else "3D Tilt Intensity",
+                                            value = design.parallax3dIntensity,
+                                            range = 0.5f..2.2f,
+                                            valueLabel = "${"%.1f".format(design.parallax3dIntensity)}x",
+                                        ) { v -> onUpdateDesign { it.copy(parallax3dIntensity = v) } }
+
+                                        Text(
+                                            text = if (design.artworkParallax3d && liveTilt.sensorActive) {
+                                                "Sensor activo • Inclina tu teléfono (X: ${"%.1f".format(liveTilt.rotX)}° | Y: ${"%.1f".format(liveTilt.rotY)}°)"
+                                            } else if (design.artworkParallax3d) {
+                                                "Calibrando giroscopio/acelerómetro..."
+                                            } else {
+                                                "Activa el interruptor de arriba para probar la carátula 3D aquí mismo."
+                                            },
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+
+                                        // Interactive Live 3D Holographic Card Test right inside BETA screen!
+                                        Box(
+                                            modifier = Modifier
+                                                .size(188.dp)
+                                                .graphicsLayer {
+                                                    if (design.artworkParallax3d) {
+                                                        cameraDistance = 12f * density
+                                                        rotationX = liveTilt.rotX
+                                                        rotationY = liveTilt.rotY
+                                                    }
+                                                }
+                                                .clip(RoundedCornerShape(26.dp))
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        listOf(palette.primary, palette.secondary, Color(0xFF00E5FF)),
+                                                    ),
+                                                ),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                modifier = Modifier.graphicsLayer {
+                                                    if (design.artworkParallax3d) {
+                                                        translationX = liveTilt.innerShiftX
+                                                        translationY = liveTilt.innerShiftY
+                                                    }
+                                                },
+                                            ) {
+                                                Icon(Icons.Rounded.GraphicEq, null, tint = Color.White, modifier = Modifier.size(54.dp))
+                                                Text("CROIX 3D", color = Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                                                Text("BETA LIVE", color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.labelSmall)
+                                            }
                                         }
                                     }
                                 }

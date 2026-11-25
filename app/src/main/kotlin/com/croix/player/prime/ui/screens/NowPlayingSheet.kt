@@ -51,6 +51,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -65,12 +66,13 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.QuestionMark
 import androidx.compose.material.icons.rounded.QueueMusic
-import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Settings
@@ -81,6 +83,7 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -97,6 +100,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -107,9 +111,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -141,10 +147,141 @@ import com.croix.prime.engine.Track
 import com.croix.prime.playback.AutoEqHeadphoneProfile
 import com.croix.prime.playback.EqPreset
 import com.croix.prime.playback.PlaybackUiState
+import com.croix.prime.playback.QueuePlayMode
 import com.croix.prime.playback.ReverbPresetMode
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
+
+/**
+ * Real-time calibrated 3D Gyroscope + Gravity Parallax sensor state (BETA).
+ * Auto-zeroes to the user's natural holding posture on activation so tilting in any direction
+ * produces immediate, silky 120fps 3D card tilt + inner artwork parallax + specular light sheen!
+ */
+internal data class ParallaxTilt(
+    val rotX: Float = 0f,
+    val rotY: Float = 0f,
+    val innerShiftX: Float = 0f,
+    val innerShiftY: Float = 0f,
+    val sheenNormX: Float = 0.5f,
+    val sheenNormY: Float = 0.5f,
+    val sensorActive: Boolean = false,
+)
+
+@Composable
+internal fun rememberParallaxTiltState(
+    enabled: Boolean,
+    intensity: Float,
+): State<ParallaxTilt> {
+    val context = LocalContext.current
+    val tiltState = remember { mutableStateOf(ParallaxTilt()) }
+
+    DisposableEffect(enabled, intensity) {
+        if (!enabled) {
+            tiltState.value = ParallaxTilt(sensorActive = false)
+            return@DisposableEffect onDispose {}
+        }
+        val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        val gravitySensor = sm?.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val gyroSensor = sm?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+
+        if (gravitySensor == null && gyroSensor == null) {
+            tiltState.value = ParallaxTilt(sensorActive = false)
+            return@DisposableEffect onDispose {}
+        }
+
+        val scale = intensity.coerceIn(0.5f, 2.2f)
+        val maxDeg = 16f * scale
+
+        var baseGx = 0f
+        var baseGy = 0f
+        var baselineSamples = 0
+        var smoothX = 0f
+        var smoothY = 0f
+        var gyroBoostX = 0f
+        var gyroBoostY = 0f
+        var lastGyroTs = 0L
+
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                when (event.sensor.type) {
+                    Sensor.TYPE_GRAVITY, Sensor.TYPE_ACCELEROMETER -> {
+                        val gx = event.values.getOrNull(0) ?: 0f
+                        val gy = event.values.getOrNull(1) ?: 0f
+                        if (baselineSamples < 6) {
+                            baseGx = (baseGx * baselineSamples + gx) / (baselineSamples + 1)
+                            baseGy = (baseGy * baselineSamples + gy) / (baselineSamples + 1)
+                            baselineSamples++
+                            return
+                        }
+                        // Slowly drift baseline so changing hand posture naturally re-centers
+                        baseGx = baseGx * 0.996f + gx * 0.004f
+                        baseGy = baseGy * 0.996f + gy * 0.004f
+
+                        val deltaY = -(gx - baseGx) * 4.2f * scale
+                        val deltaX = (gy - baseGy) * 4.2f * scale
+                        smoothX = smoothX * 0.78f + deltaX * 0.22f
+                        smoothY = smoothY * 0.78f + deltaY * 0.22f
+                        gyroBoostX *= 0.90f
+                        gyroBoostY *= 0.90f
+                    }
+                    Sensor.TYPE_GYROSCOPE -> {
+                        val ts = event.timestamp
+                        if (lastGyroTs != 0L) {
+                            val dt = ((ts - lastGyroTs) / 1_000_000_000f).coerceIn(0f, 0.06f)
+                            val wx = event.values.getOrNull(0) ?: 0f
+                            val wy = event.values.getOrNull(1) ?: 0f
+                            gyroBoostX = (gyroBoostX + wx * dt * 28f * scale).coerceIn(-10f, 10f)
+                            gyroBoostY = (gyroBoostY + wy * dt * 28f * scale).coerceIn(-10f, 10f)
+                        }
+                        lastGyroTs = ts
+                    }
+                }
+
+                val finalRotX = (smoothX + gyroBoostX).coerceIn(-maxDeg, maxDeg)
+                val finalRotY = (smoothY + gyroBoostY).coerceIn(-maxDeg, maxDeg)
+                tiltState.value = ParallaxTilt(
+                    rotX = finalRotX,
+                    rotY = finalRotY,
+                    innerShiftX = -finalRotY * 1.45f,
+                    innerShiftY = finalRotX * 1.45f,
+                    sheenNormX = (0.5f + finalRotY / (maxDeg * 2.2f)).coerceIn(0.05f, 0.95f),
+                    sheenNormY = (0.5f - finalRotX / (maxDeg * 2.2f)).coerceIn(0.05f, 0.95f),
+                    sensorActive = true,
+                )
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+
+        if (gravitySensor != null) {
+            sm?.registerListener(listener, gravitySensor, SensorManager.SENSOR_DELAY_GAME)
+        }
+        if (gyroSensor != null) {
+            sm?.registerListener(listener, gyroSensor, SensorManager.SENSOR_DELAY_GAME)
+        }
+        onDispose {
+            sm?.unregisterListener(listener)
+        }
+    }
+    return tiltState
+}
+
+/**
+ * Computes progressive Blind Discovery reveal factor (0f = 0..45s hidden ???, 0f..1f = 45..55s gradual reveal, 1f = revealed).
+ */
+private fun computeBlindReveal(
+    blindMode: Boolean,
+    manualReveal: Boolean,
+    positionMs: Long,
+): Float {
+    if (!blindMode || manualReveal) return 1f
+    val holdMs = 45_000L
+    val fadeMs = 10_000L
+    if (positionMs <= holdMs) return 0f
+    return ((positionMs - holdMs).toFloat() / fadeMs.toFloat()).coerceIn(0f, 1f)
+}
 
 @Composable
 fun MiniPlayerBar(
@@ -159,6 +296,11 @@ fun MiniPlayerBar(
     val track = playback.currentTrack ?: return
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
+    val blindPos = if (playback.blindDiscoveryMode && !playback.blindManualReveal) {
+        positionMsFlow.collectAsState().value
+    } else 60_000L
+    val reveal = computeBlindReveal(playback.blindDiscoveryMode, playback.blindManualReveal, blindPos)
+    val hiddenTitle = playback.blindDiscoveryMode && reveal < 0.65f
 
     val hPad = if (design.miniPlayerFloating) 16.dp else 0.dp
     val corner = if (design.miniPlayerFloating) design.cornerRadiusDp.dp else 0.dp
@@ -181,19 +323,25 @@ fun MiniPlayerBar(
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AsyncImage(
-                    model = track.thumbnailUrl,
-                    contentDescription = track.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White.copy(alpha = 0.1f)),
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    AsyncImage(
+                        model = track.thumbnailUrl,
+                        contentDescription = track.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .blur(((1f - reveal) * 18f).dp)
+                            .background(Color.White.copy(alpha = 0.1f)),
+                    )
+                    if (hiddenTitle) {
+                        Text("???", color = Color.White, fontWeight = FontWeight.Black, fontSize = 13.sp)
+                    }
+                }
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = track.title,
+                        text = if (hiddenTitle) "??? • Canción Misteriosa" else track.title,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -201,9 +349,12 @@ fun MiniPlayerBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = track.artist,
+                        text = if (hiddenTitle) {
+                            val secLeft = ((45_000L - blindPos).coerceAtLeast(0L) / 1000L).toInt()
+                            if (secLeft > 0) "Modo Misterio • Se revela en ${secLeft}s" else "Revelando pista..."
+                        } else track.artist,
                         style = MaterialTheme.typography.bodySmall,
-                        color = palette.textSecondary,
+                        color = if (hiddenTitle) palette.primary else palette.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -262,6 +413,7 @@ fun NowPlayingOverlay(
     lyricsLoading: Boolean,
     translatedLyrics: List<String>,
     translatingLyrics: Boolean,
+    translationProviderLabel: String,
     isFavorite: Boolean,
     isDownloaded: Boolean,
     downloadProgress: Float?,
@@ -272,8 +424,11 @@ fun NowPlayingOverlay(
     onSeekRelative: (Long) -> Unit,
     onNext: () -> Unit,
     onPrev: () -> Unit,
-    onToggleShuffle: () -> Unit,
-    onToggleRepeat: () -> Unit,
+    onCycleQueueMode: () -> Unit,
+    onToggleKaraoke: (Boolean) -> Unit,
+    onSetKaraokeStrength: (Float) -> Unit,
+    onRevealBlindTrack: () -> Unit,
+    onExitBlindMode: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onDownloadTrack: (Track) -> Unit,
     onRequestAddToPlaylist: (Track) -> Unit,
@@ -306,48 +461,24 @@ fun NowPlayingOverlay(
     val palette = LocalCroixPalette.current
     val strings = LocalCroixStrings.current
     val es = strings.isSpanish
-    var activePanel by remember { mutableIntStateOf(0) } // 0=Player, 1=Lyrics, 2=Queue, 3=EQ/8D/Reverb/Sleep
+    var activePanel by remember { mutableIntStateOf(0) } // 0=Player, 1=Lyrics, 2=Queue, 3=EQ/8D/Karaoke/Sleep
     var carMode by remember { mutableStateOf(false) }
     var showAudioInspector by remember { mutableStateOf(false) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
 
-    // 3D Gyroscope / Accelerometer Parallax state (only active on Panel 0 when enabled!)
-    var tiltX by remember { mutableFloatStateOf(0f) }
-    var tiltY by remember { mutableFloatStateOf(0f) }
-    val ctx = LocalContext.current
-    DisposableEffect(design.artworkParallax3d, activePanel) {
-        if (!design.artworkParallax3d || activePanel != 0) {
-            tiltX = 0f
-            tiltY = 0f
-            return@DisposableEffect onDispose {}
-        }
-        val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-        val sensor = sm?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
-            ?: sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        val listener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent) {
-                val rawX: Float
-                val rawY: Float
-                if (event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR) {
-                    rawX = (event.values.getOrNull(0) ?: 0f) * 24f
-                    rawY = (event.values.getOrNull(1) ?: 0f) * 24f
-                } else {
-                    rawX = (event.values.getOrNull(1) ?: 0f - 4.5f) * 1.4f
-                    rawY = -(event.values.getOrNull(0) ?: 0f) * 1.6f
-                }
-                // Low-pass filter for buttery 120fps gyro parallax
-                tiltX = (tiltX * 0.85f + rawX.coerceIn(-9f, 9f) * 0.15f)
-                tiltY = (tiltY * 0.85f + rawY.coerceIn(-9f, 9f) * 0.15f)
-            }
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-        }
-        if (sensor != null) {
-            sm?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
-        }
-        onDispose {
-            sm?.unregisterListener(listener)
-        }
-    }
+    // Blind Discovery progressive reveal (collects positionMs ONLY when Blind Mode is active!)
+    val blindPos = if (playback.blindDiscoveryMode && !playback.blindManualReveal) {
+        positionMsFlow.collectAsState().value
+    } else 60_000L
+    val blindReveal = computeBlindReveal(playback.blindDiscoveryMode, playback.blindManualReveal, blindPos)
+    val isMysteryHidden = playback.blindDiscoveryMode && blindReveal < 0.65f
+    val mysteryCountdownSec = ((45_000L - blindPos).coerceAtLeast(0L) / 1000L).toInt()
+
+    // Real Calibrated 3D Gyroscope + Gravity Parallax (BETA)
+    val tilt by rememberParallaxTiltState(
+        enabled = design.artworkParallax3d && activePanel == 0,
+        intensity = design.parallax3dIntensity,
+    )
 
     val spin = rememberInfiniteTransition(label = "vinylAndCanvas")
     val angle by spin.animateFloat(
@@ -356,7 +487,6 @@ fun NowPlayingOverlay(
         animationSpec = infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Restart),
         label = "angle",
     )
-    // Dynamic Canvas Motion backdrop Ken Burns breathing scale & drift
     val canvasScale by spin.animateFloat(
         initialValue = 1.06f,
         targetValue = 1.22f,
@@ -390,7 +520,6 @@ fun NowPlayingOverlay(
             .background(palette.background)
             .clickable(interactionSource = touchBlocker, indication = null) {},
     ) {
-        // Dynamic Motion Canvas Backdrop (smooth GPU transform when playing + enabled)
         val animateCanvas = design.canvasMotionEnabled && playback.isPlaying
         AsyncImage(
             model = track.thumbnailUrl,
@@ -405,7 +534,7 @@ fun NowPlayingOverlay(
                         translationX = canvasDriftX
                     }
                 }
-                .blur(if (activePanel == 1) design.lyricsBackdropBlurDp.dp else (design.glassBlurDp + 6f).dp),
+                .blur(if (activePanel == 1) design.lyricsBackdropBlurDp.dp else (design.glassBlurDp + 8f).dp),
         )
         Box(
             modifier = Modifier
@@ -429,7 +558,7 @@ fun NowPlayingOverlay(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            // Top Bar with Tappable Audio Technical Inspector Pill + Private Mode badge
+            // Top Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -448,9 +577,16 @@ fun NowPlayingOverlay(
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(strings.playingNow, style = MaterialTheme.typography.labelMedium, color = palette.textSecondary)
+                        Text(
+                            text = if (playback.blindDiscoveryMode) "MODO MISTERIO 45s" else strings.playingNow,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (playback.blindDiscoveryMode) palette.primary else palette.textSecondary,
+                        )
                         if (design.privateSessionEnabled) {
                             Icon(Icons.Rounded.VisibilityOff, contentDescription = "Sesión privada", tint = Color(0xFFCE93D8), modifier = Modifier.size(13.dp))
+                        }
+                        if (playback.karaokeEnabled) {
+                            Text("KARAOKE", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color(0xFFFF4081))
                         }
                         if (playback.audio8dEnabled) {
                             Text("8D", fontSize = 10.sp, fontWeight = FontWeight.Black, color = palette.primary)
@@ -484,7 +620,53 @@ fun NowPlayingOverlay(
                 }
             }
 
-            if (playback.lastSkippedNotice != null) {
+            // Live Notice Banners (Queue Mode / SponsorBlock / Blind Discovery Exit / Errors)
+            if (playback.queueModeNotice != null) {
+                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.secondary, cornerRadius = 14.dp) {
+                    Text(
+                        text = "✦ ${playback.queueModeNotice}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 7.dp),
+                    )
+                }
+            } else if (playback.blindDiscoveryMode) {
+                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary, cornerRadius = 14.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = when {
+                                blindReveal >= 0.99f -> "✨ ¡Canción descubierta!"
+                                mysteryCountdownSec > 0 -> "🔮 Escucha a ciegas • Se revela en ${mysteryCountdownSec}s"
+                                else -> "✨ Revelando canción poco a poco..."
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (blindReveal < 0.99f) {
+                                CroixGlassCard(cornerRadius = 50.dp, onClick = onRevealBlindTrack) {
+                                    Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Rounded.Visibility, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                                        Spacer(Modifier.width(3.dp))
+                                        Text("Revelar", fontSize = 11.sp, color = Color.White)
+                                    }
+                                }
+                            }
+                            CroixGlassCard(cornerRadius = 50.dp, onClick = onExitBlindMode) {
+                                Text("Salir", fontSize = 11.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                        }
+                    }
+                }
+            } else if (playback.lastSkippedNotice != null) {
                 CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary, cornerRadius = 14.dp) {
                     Text(
                         text = playback.lastSkippedNotice!!,
@@ -518,7 +700,7 @@ fun NowPlayingOverlay(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(vertical = 10.dp),
+                    .padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 val panelDur = (240f / design.transitionSpeed).toInt().coerceIn(80, 480)
@@ -544,6 +726,7 @@ fun NowPlayingOverlay(
                                 else -> 0.84f
                             }
                             val rotation = if (design.vinylSpinEnabled && playback.isPlaying) angle else 0f
+                            val blindBlurDp = ((1f - blindReveal) * 34f).dp
 
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
@@ -557,11 +740,9 @@ fun NowPlayingOverlay(
                                         .offset { IntOffset(dragOffsetX.roundToInt(), 0) }
                                         .graphicsLayer {
                                             if (design.artworkParallax3d) {
-                                                cameraDistance = 14f * density
-                                                rotationX = tiltX
-                                                rotationY = tiltY
-                                                translationX = tiltY * 1.4f
-                                                translationY = -tiltX * 1.4f
+                                                cameraDistance = 12f * density
+                                                rotationX = tilt.rotX
+                                                rotationY = tilt.rotY
                                             }
                                         }
                                         .pointerInput(design.swipeArtworkToSkip) {
@@ -589,15 +770,89 @@ fun NowPlayingOverlay(
                                         },
                                     cornerRadius = if (design.vinylSpinEnabled) 200.dp else design.artworkCornerDp.dp,
                                 ) {
-                                    AsyncImage(
-                                        model = track.thumbnailUrl,
-                                        contentDescription = track.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(artShape)
-                                            .rotate(rotation),
-                                    )
+                                    Box(modifier = Modifier.fillMaxSize().clip(artShape)) {
+                                        AsyncImage(
+                                            model = track.thumbnailUrl,
+                                            contentDescription = track.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer {
+                                                    if (design.artworkParallax3d) {
+                                                        scaleX = 1.13f
+                                                        scaleY = 1.13f
+                                                        translationX = tilt.innerShiftX
+                                                        translationY = tilt.innerShiftY
+                                                    }
+                                                }
+                                                .rotate(rotation)
+                                                .blur(blindBlurDp),
+                                        )
+
+                                        // Holographic 3D Specular Sheen sliding with phone tilt (BETA)
+                                        if (design.artworkParallax3d && tilt.sensorActive) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(
+                                                        Brush.radialGradient(
+                                                            colors = listOf(
+                                                                Color.White.copy(alpha = 0.24f),
+                                                                Color.Transparent,
+                                                            ),
+                                                            center = Offset(tilt.sheenNormX * 900f, tilt.sheenNormY * 900f),
+                                                            radius = 650f,
+                                                        ),
+                                                    ),
+                                            )
+                                        }
+
+                                        // Blind Discovery 45s ??? Mystery Veil + Smooth Fade-out on Reveal
+                                        if (playback.blindDiscoveryMode && blindReveal < 0.98f) {
+                                            val veilAlpha = (1f - blindReveal).coerceIn(0f, 1f)
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .alpha(veilAlpha)
+                                                    .background(
+                                                        Brush.radialGradient(
+                                                            listOf(
+                                                                palette.primary.copy(alpha = 0.45f),
+                                                                Color(0xFF0A0913).copy(alpha = 0.88f),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(84.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color.White.copy(alpha = 0.14f)),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Icon(Icons.Rounded.QuestionMark, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                                                    }
+                                                    Text(
+                                                        text = "???",
+                                                        fontSize = 32.sp,
+                                                        fontWeight = FontWeight.Black,
+                                                        color = Color.White,
+                                                        letterSpacing = 4.sp,
+                                                    )
+                                                    Text(
+                                                        text = if (mysteryCountdownSec > 0) "Revelando en ${mysteryCountdownSec}s" else "Revelando...",
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        color = Color.White.copy(alpha = 0.88f),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                                 CroixAudioVisualizer(
                                     isPlaying = playback.isPlaying,
@@ -610,10 +865,14 @@ fun NowPlayingOverlay(
                             isLoading = lyricsLoading,
                             translatedLyrics = translatedLyrics,
                             translating = translatingLyrics,
+                            translationProviderLabel = translationProviderLabel,
+                            karaokeEnabled = playback.karaokeEnabled,
+                            karaokeStrength = playback.karaokeStrength,
                             offsetMs = design.lyricsOffsetMs,
                             positionMsFlow = positionMsFlow,
                             onSeekMs = onSeekMs,
                             onTranslate = onTranslateLyrics,
+                            onSetKaraokeStrength = onSetKaraokeStrength,
                             onAdjustOffset = onAdjustLyricsOffset,
                             onShareLyricCard = { lines ->
                                 onShareLyricCard(lines, palette.primary.toArgb(), palette.secondary.toArgb())
@@ -622,6 +881,7 @@ fun NowPlayingOverlay(
                         2 -> QueueProPanel(
                             queue = playback.queue,
                             currentIndex = playback.currentIndex,
+                            blindDiscoveryMode = playback.blindDiscoveryMode,
                             onSelect = onSelectQueueIndex,
                             onRemove = onRemoveQueueIndex,
                             onMoveItem = onMoveQueueItem,
@@ -634,6 +894,8 @@ fun NowPlayingOverlay(
                             onSetSpeed = onSetSpeed,
                             onSetPitch = onSetPitch,
                             onSetSkipSilence = onSetSkipSilence,
+                            onSetKaraokeEnabled = onToggleKaraoke,
+                            onSetKaraokeStrength = onSetKaraokeStrength,
                             onSetAudio8dEnabled = onSetAudio8dEnabled,
                             onSetAudio8dSpeed = onSetAudio8dSpeed,
                             onSetReverbMode = onSetReverbMode,
@@ -666,19 +928,19 @@ fun NowPlayingOverlay(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = track.title,
+                                text = if (isMysteryHidden) "??? • Pista Misteriosa" else track.title,
                                 style = MaterialTheme.typography.titleLarge,
                                 color = Color.White,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = track.artist,
+                                text = if (isMysteryHidden) "Artista oculto • Escucha sin prejuicios" else track.artist,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = palette.primary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.clickable { onOpenArtist(track.artist) },
+                                modifier = Modifier.clickable(enabled = !isMysteryHidden) { onOpenArtist(track.artist) },
                             )
                         }
                         if (downloadProgress != null) {
@@ -715,21 +977,36 @@ fun NowPlayingOverlay(
                         onSeekFraction = onSeekFraction,
                     )
 
+                    // Main Transport Row: [3-State Spotify Smart Shuffle] [Prev] [PLAY/PAUSE] [Next] [Karaoke Mic]
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(onClick = onToggleShuffle) {
-                            Icon(
-                                Icons.Rounded.Shuffle,
-                                contentDescription = "Aleatorio",
-                                tint = if (playback.shuffleEnabled) palette.primary else palette.textSecondary,
-                            )
+                        val (modeIcon, modeTint) = when (playback.queuePlayMode) {
+                            QueuePlayMode.NORMAL -> Icons.Rounded.Shuffle to palette.textSecondary
+                            QueuePlayMode.SHUFFLE -> Icons.Rounded.Shuffle to palette.primary
+                            QueuePlayMode.REPEAT_ONE -> Icons.Rounded.RepeatOne to palette.secondary
+                            QueuePlayMode.SMART_MIX -> Icons.Rounded.AutoAwesome to Color(0xFF00E5FF)
                         }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            IconButton(onClick = onCycleQueueMode) {
+                                Icon(modeIcon, contentDescription = playback.queuePlayMode.labelEs, tint = modeTint)
+                            }
+                            if (playback.queuePlayMode != QueuePlayMode.NORMAL) {
+                                Text(
+                                    text = playback.queuePlayMode.shortTag,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = modeTint,
+                                )
+                            }
+                        }
+
                         IconButton(onClick = onPrev) {
                             Icon(Icons.Rounded.SkipPrevious, contentDescription = "Anterior", tint = Color.White, modifier = Modifier.size(34.dp))
                         }
+
                         Box(
                             modifier = Modifier
                                 .size(62.dp)
@@ -748,15 +1025,32 @@ fun NowPlayingOverlay(
                                 modifier = Modifier.size(36.dp),
                             )
                         }
+
                         IconButton(onClick = onNext) {
                             Icon(Icons.Rounded.SkipNext, contentDescription = "Siguiente", tint = Color.White, modifier = Modifier.size(34.dp))
                         }
-                        IconButton(onClick = onToggleRepeat) {
-                            Icon(
-                                if (playback.repeatOne) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                                contentDescription = "Repetir",
-                                tint = if (playback.repeatOne) palette.primary else palette.textSecondary,
-                            )
+
+                        // Dedicated Karaoke Microphone button right next to Play/Next: reduces vocals + opens Lyrics!
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            IconButton(
+                                onClick = {
+                                    val nextKaraoke = !playback.karaokeEnabled
+                                    onToggleKaraoke(nextKaraoke)
+                                    if (nextKaraoke) activePanel = 1
+                                },
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(if (playback.karaokeEnabled) Color(0xFFFF4081).copy(alpha = 0.28f) else Color.Transparent),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Mic,
+                                    contentDescription = "Modo Karaoke",
+                                    tint = if (playback.karaokeEnabled) Color(0xFFFF4081) else palette.textSecondary,
+                                )
+                            }
+                            if (playback.karaokeEnabled) {
+                                Text("Karaoke", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF4081))
+                            }
                         }
                     }
 
@@ -797,6 +1091,7 @@ fun NowPlayingOverlay(
                     InspectorRow(if (es) "Origen" else "Source", specs.sourceOrigin)
                     InspectorRow(if (es) "Cliente Motor" else "Engine Client", specs.clientKey)
                     InspectorRow(if (es) "Salida de Audio" else "Output Route", "${playback.activeOutput.route.labelEs} (${playback.activeOutput.deviceName})")
+                    InspectorRow("Modo Karaoke DSP", if (playback.karaokeEnabled) "Activo (-${(playback.karaokeStrength * 100).roundToInt()}% voz)" else "Apagado")
                     InspectorRow("Audio Espacial 8D", if (playback.audio8dEnabled) "Activo (${(playback.audio8dSpeed * 100).roundToInt()}%)" else "Apagado")
                     InspectorRow("Reverb", playback.reverbMode.label)
                     InspectorRow("AutoEq / EQ", if (playback.eqEnabled) { if (playback.autoEqProfile != AutoEqHeadphoneProfile.FLAT) playback.autoEqProfile.label else playback.eqPreset.label } else "Plano")
@@ -924,23 +1219,20 @@ private fun PanelToggleIcon(
     }
 }
 
-/**
- * Upgraded Multi-Source Synced Lyrics Panel:
- * - Source pill (LRCLib / Spotify Lyrics / YouTube Music)
- * - Live Spanish translation toggle + offline Romanization toggle
- * - Sync offset controls (-0.5s / 0s / +0.5s)
- * - Select 1-4 lines -> Share translucent Glassmorphism PNG Lyric Card!
- */
 @Composable
 private fun SyncedLyricsProPanel(
     lyrics: LyricsResult?,
     isLoading: Boolean,
     translatedLyrics: List<String>,
     translating: Boolean,
+    translationProviderLabel: String,
+    karaokeEnabled: Boolean,
+    karaokeStrength: Float,
     offsetMs: Long,
     positionMsFlow: StateFlow<Long>,
     onSeekMs: (Long) -> Unit,
     onTranslate: () -> Unit,
+    onSetKaraokeStrength: (Float) -> Unit,
     onAdjustOffset: (Long) -> Unit,
     onShareLyricCard: (List<String>) -> Unit,
 ) {
@@ -973,6 +1265,26 @@ private fun SyncedLyricsProPanel(
     }
 
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Active Karaoke Quick Vocal-Reduction Bar right above Lyrics!
+        if (karaokeEnabled) {
+            CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFFF4081), cornerRadius = 14.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Rounded.Mic, null, tint = Color(0xFFFF4081), modifier = Modifier.size(16.dp))
+                    Text("Voz -${(karaokeStrength * 100).roundToInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Slider(
+                        value = karaokeStrength,
+                        onValueChange = onSetKaraokeStrength,
+                        valueRange = 0.3f..1.0f,
+                        modifier = Modifier.weight(1f).height(28.dp),
+                    )
+                }
+            }
+        }
+
         // Lyrics Pro Toolbar
         Row(
             modifier = Modifier
@@ -994,7 +1306,15 @@ private fun SyncedLyricsProPanel(
             ) {
                 Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Rounded.Translate, null, tint = Color.White, modifier = Modifier.size(13.dp))
-                    Text(if (translating) "..." else "Traducir ES", fontSize = 11.sp, color = Color.White)
+                    Text(
+                        when {
+                            translating -> "Traduciendo..."
+                            showTranslation && translationProviderLabel.isNotBlank() -> translationProviderLabel
+                            else -> "Traducir ES"
+                        },
+                        fontSize = 11.sp,
+                        color = Color.White,
+                    )
                 }
             }
             CroixGlassCard(
@@ -1150,13 +1470,11 @@ private fun SyncedLyricsProPanel(
     }
 }
 
-/**
- * Queue Pro Panel ([N]): Up/Down reorder, 1-tap Deduplicate, 1-tap Save Queue as Playlist!
- */
 @Composable
 private fun QueueProPanel(
     queue: List<Track>,
     currentIndex: Int,
+    blindDiscoveryMode: Boolean,
     onSelect: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onMoveItem: (Int, Int) -> Unit,
@@ -1218,6 +1536,7 @@ private fun QueueProPanel(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             itemsIndexed(queue) { idx, t ->
+                val hideFuture = blindDiscoveryMode && idx >= currentIndex
                 CroixGlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     accentTint = if (idx == currentIndex) palette.primary else null,
@@ -1227,16 +1546,35 @@ private fun QueueProPanel(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        AsyncImage(
-                            model = t.thumbnailUrl,
-                            contentDescription = t.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)),
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            AsyncImage(
+                                model = t.thumbnailUrl,
+                                contentDescription = t.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .blur(if (hideFuture) 18.dp else 0.dp),
+                            )
+                            if (hideFuture) {
+                                Text("???", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
+                            }
+                        }
                         Spacer(Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(t.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(t.artist, color = palette.textSecondary, fontSize = 12.sp, maxLines = 1)
+                            Text(
+                                text = if (hideFuture) "??? • Pista Misteriosa #${idx + 1}" else t.title,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = if (hideFuture) "Se revelará tras 45s de escucha" else t.artist,
+                                color = palette.textSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                            )
                         }
                         if (idx > 0) {
                             IconButton(onClick = { onMoveItem(idx, idx - 1) }, modifier = Modifier.size(28.dp)) {
@@ -1286,9 +1624,6 @@ private fun QueueProPanel(
     }
 }
 
-/**
- * Spatial Audio 8D + Reverb + AutoEq Headphones + 5-Band EQ + Speed/Pitch + Sleep Timer Panel ([A], [O])
- */
 @Composable
 private fun EqualizerAndSpatialPanel(
     playback: PlaybackUiState,
@@ -1296,6 +1631,8 @@ private fun EqualizerAndSpatialPanel(
     onSetSpeed: (Float) -> Unit,
     onSetPitch: (Float) -> Unit,
     onSetSkipSilence: (Boolean) -> Unit,
+    onSetKaraokeEnabled: (Boolean) -> Unit,
+    onSetKaraokeStrength: (Float) -> Unit,
     onSetAudio8dEnabled: (Boolean) -> Unit,
     onSetAudio8dSpeed: (Float) -> Unit,
     onSetReverbMode: (ReverbPresetMode) -> Unit,
@@ -1318,7 +1655,6 @@ private fun EqualizerAndSpatialPanel(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Active Output Device Badge
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Rounded.Headphones, null, tint = palette.secondary, modifier = Modifier.size(18.dp))
                 Text(
@@ -1329,6 +1665,22 @@ private fun EqualizerAndSpatialPanel(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+
+            // Karaoke Vocal Remover DSP
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Rounded.Mic, null, tint = Color(0xFFFF4081), modifier = Modifier.size(18.dp))
+                    Text(if (es) "Modo Karaoke (Quitar voz)" else "Karaoke Vocal Remover", color = Color(0xFFFF4081), fontWeight = FontWeight.Bold)
+                }
+                Switch(checked = playback.karaokeEnabled, onCheckedChange = onSetKaraokeEnabled)
+            }
+            if (playback.karaokeEnabled) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (es) "Reducción de voz" else "Vocal Reduction", color = Color.White, fontSize = 12.sp)
+                    Text("${(playback.karaokeStrength * 100).roundToInt()}%", color = Color(0xFFFF4081), fontSize = 12.sp)
+                }
+                Slider(value = playback.karaokeStrength, onValueChange = onSetKaraokeStrength, valueRange = 0.3f..1.0f)
             }
 
             // 8D Spatial Audio + Reverb Section
@@ -1360,7 +1712,6 @@ private fun EqualizerAndSpatialPanel(
                 }
             }
 
-            // AutoEq Headphone Profiles
             Text(if (es) "AutoEq para Audífonos" else "AutoEq Headphone Profiles", color = palette.primary, fontWeight = FontWeight.Bold)
             Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 AutoEqHeadphoneProfile.entries.forEach { prof ->
@@ -1374,7 +1725,6 @@ private fun EqualizerAndSpatialPanel(
                 }
             }
 
-            // 5-Band EQ
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(if (es) "Ecualizador de 5 Bandas" else "5-Band Equalizer", color = palette.primary, fontWeight = FontWeight.Bold)
                 Switch(checked = playback.eqEnabled, onCheckedChange = onSetEqEnabled)
@@ -1412,7 +1762,6 @@ private fun EqualizerAndSpatialPanel(
             Text("${if (es) "Ganancia de Volumen" else "Loudness Boost"}: +${playback.loudnessGainMb / 100} dB", color = Color.White, fontSize = 13.sp)
             Slider(value = playback.loudnessGainMb.toFloat(), onValueChange = { onSetLoudness(it.roundToInt()) }, valueRange = 0f..1200f)
 
-            // Speed, Pitch & Skip Silence
             Text(if (es) "Velocidad, Tono y Silencios" else "Speed, Pitch & Skip Silence", color = palette.primary, fontWeight = FontWeight.Bold)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(if (es) "Velocidad" else "Speed", color = Color.White, fontSize = 13.sp)

@@ -137,4 +137,36 @@ class EngineUnitTests {
         )
         assertEquals(listOf("v4", "v7"), filtered.map { it.id })
     }
+
+    @Test
+    fun `smart balanced queue interleaves favorite known and discovery cleanly`() {
+        val current = Track("cur", "Current", "Artist A")
+        val favs = listOf(Track("f1", "Fav 1", "A1"), Track("f2", "Fav 2", "A2"))
+        val known = listOf(Track("k1", "Known 1", "B1"), Track("k2", "Known 2", "B2"))
+        val disc = listOf(Track("d1", "Discovery 1", "C1"), Track("d2", "Discovery 2", "C2"))
+
+        val mix = HybridAlgorithmEngine.buildSmartBalancedQueue(
+            currentTrack = current,
+            favorites = favs,
+            familiarHistory = known,
+            discoveryPool = disc,
+        )
+        assertEquals(listOf("cur", "f1", "k1", "d1", "f2", "k2", "d2"), mix.map { it.id })
+    }
+
+    @Test
+    fun `ai client parses numbered spanish translations and json recommendations`() {
+        val ai = CroixAiClient()
+        val tr = ai.parseNumberedTranslations("1|Hola mundo\n2|Noche eterna", 2)
+        assertEquals(listOf("Hola mundo", "Noche eterna"), tr)
+
+        val recs = ai.parseRecommendationsJson(
+            """```json
+            [{"title":"Midnight City","artist":"M83","reasonEs":"Synthpop nocturno cinematográfico"}]
+            ```""",
+        )
+        assertEquals(1, recs.size)
+        assertEquals("Midnight City", recs.first().title)
+        assertEquals("M83", recs.first().artist)
+    }
 }

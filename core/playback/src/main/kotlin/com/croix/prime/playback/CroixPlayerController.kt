@@ -84,6 +84,13 @@ data class AudioTechnicalSpecs(
     val isCachedOnDisk: Boolean = false,
 )
 
+enum class QueuePlayMode(val labelEs: String, val shortTag: String) {
+    NORMAL("Orden normal", "Normal"),
+    SHUFFLE("Aleatorio activado", "Aleatorio"),
+    REPEAT_ONE("Solo esta canción (bucle)", "Solo esta"),
+    SMART_MIX("Cola Inteligente: 1 Fav • 1 Conocida • 1 Nueva", "Mix IA"),
+}
+
 data class PlaybackUiState(
     val currentTrack: Track? = null,
     val isPlayingOfflineFile: Boolean = false,
@@ -94,6 +101,8 @@ data class PlaybackUiState(
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
     val durationMs: Long = 0L,
+    val queuePlayMode: QueuePlayMode = QueuePlayMode.NORMAL,
+    val queueModeNotice: String? = null,
     val shuffleEnabled: Boolean = false,
     val repeatOne: Boolean = false,
     val playbackSpeed: Float = 1.0f,
@@ -110,6 +119,10 @@ data class PlaybackUiState(
     val loudnessGainMb: Int = 0,
     val audio8dEnabled: Boolean = false,
     val audio8dSpeed: Float = 0.45f,
+    val karaokeEnabled: Boolean = false,
+    val karaokeStrength: Float = 0.88f,
+    val blindDiscoveryMode: Boolean = false,
+    val blindManualReveal: Boolean = false,
     val reverbMode: ReverbPresetMode = ReverbPresetMode.OFF,
     val activeOutput: ActiveAudioOutput = ActiveAudioOutput(),
     val errorMessage: String? = null,
@@ -289,7 +302,12 @@ class CroixPlayerController(
         }
     }
 
-    fun playTrack(track: Track, newQueue: List<Track> = listOf(track), autoFetchRadio: Boolean = true) {
+    fun playTrack(
+        track: Track,
+        newQueue: List<Track> = listOf(track),
+        autoFetchRadio: Boolean = true,
+        blindDiscovery: Boolean = false,
+    ) {
         val queueList = if (newQueue.any { it.id == track.id }) newQueue else listOf(track) + newQueue
         val idx = queueList.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
         _positionMs.value = 0L
@@ -301,6 +319,8 @@ class CroixPlayerController(
                 isBuffering = true,
                 durationMs = track.durationSeconds * 1000L,
                 sponsorSegments = emptyList(),
+                blindDiscoveryMode = blindDiscovery,
+                blindManualReveal = false,
                 errorMessage = null,
             )
         }
@@ -441,6 +461,7 @@ class CroixPlayerController(
                 isBuffering = true,
                 durationMs = track.durationSeconds * 1000L,
                 sponsorSegments = emptyList(),
+                blindManualReveal = false,
                 errorMessage = null,
             )
         }
@@ -670,8 +691,92 @@ class CroixPlayerController(
         playAtIndex(prev)
     }
 
-    fun toggleShuffle() = _state.update { it.copy(shuffleEnabled = !it.shuffleEnabled) }
-    fun toggleRepeatOne() = _state.update { it.copy(repeatOne = !it.repeatOne) }
+    fun toggleShuffle() {
+        val nextShuffle = !_state.value.shuffleEnabled
+        _state.update {
+            it.copy(
+                shuffleEnabled = nextShuffle,
+                queuePlayMode = if (nextShuffle) QueuePlayMode.SHUFFLE else QueuePlayMode.NORMAL,
+            )
+        }
+    }
+
+    fun toggleRepeatOne() {
+        val nextRep = !_state.value.repeatOne
+        _state.update {
+            it.copy(
+                repeatOne = nextRep,
+                queuePlayMode = if (nextRep) QueuePlayMode.REPEAT_ONE else QueuePlayMode.NORMAL,
+            )
+        }
+    }
+
+    /**
+     * Spotify-style 3-stage smart queue mode cycle on the shuffle button:
+     * 1st click: SHUFFLE (Aleatorio)
+     * 2nd click: REPEAT_ONE (Solo esta canción en bucle)
+     * 3rd click: SMART_MIX (Cola Inteligente: 1 Favorita + 1 Conocida + 1 Descubrimiento)
+     * 4th click: NORMAL (Orden normal)
+     */
+    fun cycleQueuePlayMode(smartMixQueueBuilder: suspend (Track) -> List<Track>) {
+        val cur = _state.value
+        val nextMode = when (cur.queuePlayMode) {
+            QueuePlayMode.NORMAL -> QueuePlayMode.SHUFFLE
+            QueuePlayMode.SHUFFLE -> QueuePlayMode.REPEAT_ONE
+            QueuePlayMode.REPEAT_ONE -> QueuePlayMode.SMART_MIX
+            QueuePlayMode.SMART_MIX -> QueuePlayMode.NORMAL
+        }
+        _state.update {
+            it.copy(
+                queuePlayMode = nextMode,
+                shuffleEnabled = nextMode == QueuePlayMode.SHUFFLE,
+                repeatOne = nextMode == QueuePlayMode.REPEAT_ONE,
+                queueModeNotice = nextMode.labelEs,
+            )
+        }
+        scope.launch {
+            delay(3_200L)
+            if (_state.value.queueModeNotice == nextMode.labelEs) {
+                _state.update { it.copy(queueModeNotice = null) }
+            }
+        }
+        if (nextMode == QueuePlayMode.SMART_MIX) {
+            val activeTrack = cur.currentTrack ?: return
+            scope.launch {
+                val balancedQueue = smartMixQueueBuilder(activeTrack)
+                if (balancedQueue.size > 1 && _state.value.currentTrack?.id == activeTrack.id && _state.value.queuePlayMode == QueuePlayMode.SMART_MIX) {
+                    _state.update { it.copy(queue = balancedQueue, currentIndex = 0) }
+                    // Prefetch the very next track in the Smart Mix
+                    balancedQueue.getOrNull(1)?.let { next ->
+                        if (localFileProvider(next.id) == null) {
+                            launch(Dispatchers.IO) { innerTube.prefetchAudioStream(next.id) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun revealBlindTrackNow() {
+        _state.update { it.copy(blindManualReveal = true) }
+    }
+
+    fun exitBlindDiscoveryMode() {
+        _state.update { it.copy(blindDiscoveryMode = false, blindManualReveal = false) }
+    }
+
+    @OptIn(UnstableApi::class)
+    fun setKaraokeEnabled(enabled: Boolean) {
+        CroixAudioSessionBridge.audio8dProcessor.karaokeEnabled = enabled
+        _state.update { it.copy(karaokeEnabled = enabled) }
+    }
+
+    @OptIn(UnstableApi::class)
+    fun setKaraokeStrength(strength: Float) {
+        val clamped = strength.coerceIn(0.3f, 1.0f)
+        CroixAudioSessionBridge.audio8dProcessor.karaokeStrength = clamped
+        _state.update { it.copy(karaokeStrength = clamped) }
+    }
 
     fun setPlaybackSpeed(speed: Float) {
         val clamped = speed.coerceIn(0.5f, 2.0f)

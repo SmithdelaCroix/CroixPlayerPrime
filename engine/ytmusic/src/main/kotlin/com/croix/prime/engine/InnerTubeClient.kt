@@ -186,6 +186,68 @@ class InnerTubeClient(
         }
     }
 
+    /**
+     * Real YouTube Music Account Library Synchronization:
+     * Fetches the user's real Liked Songs (FEmusic_liked_videos), Listening History (FEmusic_history),
+     * and Saved Playlists (FEmusic_liked_playlists) using their authenticated SAPISID session.
+     */
+    suspend fun syncYtMusicAccountLibrary(): Result<YtMusicLibrarySyncSnapshot> = withContext(Dispatchers.IO) {
+        if (!serverConfig.hasYtMusicAccount) {
+            return@withContext Result.failure(IllegalStateException("Conecta tu cuenta de YouTube Music primero"))
+        }
+        runCatching {
+            val liked = fetchAuthenticatedTrackFeed("FEmusic_liked_videos", limit = 60)
+            val history = fetchAuthenticatedTrackFeed("FEmusic_history", limit = 50)
+            val playlists = fetchAuthenticatedPlaylists()
+            YtMusicLibrarySyncSnapshot(
+                likedSongs = liked,
+                historyTracks = history,
+                playlists = playlists,
+                syncedAtEpochMs = System.currentTimeMillis(),
+            )
+        }
+    }
+
+    suspend fun fetchYtMusicPlaylistTracks(browseId: String): Result<List<Track>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val normalizedId = if (browseId.startsWith("VL") || browseId.startsWith("FE")) browseId else "VL$browseId"
+            val tracks = fetchAuthenticatedTrackFeed(normalizedId, limit = 80)
+            if (tracks.isEmpty()) error("No se encontraron pistas en esta playlist de YT Music")
+            tracks
+        }
+    }
+
+    private suspend fun fetchAuthenticatedTrackFeed(browseId: String, limit: Int): List<Track> = runCatching {
+        val payload = buildWebRemixContext {
+            put("browseId", browseId)
+        }
+        val raw = postInnerTube("browse", payload)
+        val root = json.parseToJsonElement(raw).jsonObject
+        extractTracksFromTree(root).distinctBy { it.id }.take(limit)
+    }.getOrElse { emptyList() }
+
+    private suspend fun fetchAuthenticatedPlaylists(): List<YtMusicPlaylistSummary> = runCatching {
+        val payload = buildWebRemixContext {
+            put("browseId", "FEmusic_liked_playlists")
+        }
+        val raw = postInnerTube("browse", payload)
+        val root = json.parseToJsonElement(raw).jsonObject
+        val out = mutableListOf<YtMusicPlaylistSummary>()
+        findAllObjectsByKey(root, "musicTwoRowItemRenderer").forEach { item ->
+            val bid = item["navigationEndpoint"]?.jsonObject
+                ?.get("browseEndpoint")?.jsonObject
+                ?.get("browseId")?.jsonPrimitive?.contentOrNull
+                ?: return@forEach
+            if (!bid.startsWith("VL") && !bid.startsWith("PL") && !bid.startsWith("LM")) return@forEach
+            val title = item["title"]?.let(::extractColumnText).orEmpty().trim()
+            if (title.isBlank()) return@forEach
+            val subtitle = item["subtitle"]?.let(::extractColumnText).orEmpty().trim()
+            val thumb = upgradeThumbResolution(extractBestThumbnail(item["thumbnailRenderer"]))
+            out += YtMusicPlaylistSummary(browseId = bid, title = title, subtitle = subtitle, thumbnailUrl = thumb)
+        }
+        out.distinctBy { it.browseId }.take(30)
+    }.getOrElse { emptyList() }
+
     init {
         ensureNewPipeInit(okHttp)
     }

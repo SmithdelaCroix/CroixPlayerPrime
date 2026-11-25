@@ -38,10 +38,12 @@ import com.croix.prime.design.PrimeAudioQuality
 import com.croix.prime.design.PrimePresets
 import com.croix.prime.design.resolveCroixStrings
 import com.croix.prime.engine.AdBlockEngine
+import com.croix.prime.engine.AiApiConfig
 import com.croix.prime.engine.AlbumDetail
 import com.croix.prime.engine.AlbumSummary
 import com.croix.prime.engine.ArtistProfile
 import com.croix.prime.engine.AudioQualityMode
+import com.croix.prime.engine.CroixAiClient
 import com.croix.prime.engine.DiscordRpcClient
 import com.croix.prime.engine.ExternalIntegrationsConfig
 import com.croix.prime.engine.HomeFeedBundle
@@ -62,6 +64,7 @@ import com.croix.prime.engine.SpotifyPlaylistSummary
 import com.croix.prime.engine.SpotifyTasteClient
 import com.croix.prime.engine.SpotifyTasteSnapshot
 import com.croix.prime.engine.Track
+import com.croix.prime.engine.YtMusicPlaylistSummary
 import com.croix.prime.playback.AudioOutputRoute
 import com.croix.prime.playback.AutoEqHeadphoneProfile
 import com.croix.prime.playback.CroixAudioCache
@@ -98,12 +101,25 @@ data class ShazamUiState(
     val error: String? = null,
 )
 
+data class AiCuratedTrack(
+    val track: Track,
+    val reasonEs: String,
+)
+
+data class AiCuratorUiState(
+    val loading: Boolean = false,
+    val items: List<AiCuratedTrack> = emptyList(),
+    val error: String? = null,
+    val lastPrompt: String = "",
+)
+
 class CroixPrimeViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application.applicationContext
     private val innerTube = InnerTubeClient()
     private val sponsorBlock = SponsorBlockClient()
     private val lrclib = LrclibClient()
     private val lyricsTranslator = LyricsTranslator()
+    private val aiClient = CroixAiClient()
     private val spotifyClient = SpotifyTasteClient()
     private val hybridEngine = HybridAlgorithmEngine(innerTube)
     private val shazamClient = ShazamRecognitionClient()
@@ -136,6 +152,9 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     private val _spotifySyncing = MutableStateFlow(false)
     val spotifySyncing: StateFlow<Boolean> = _spotifySyncing.asStateFlow()
 
+    private val _ytMusicSyncing = MutableStateFlow(false)
+    val ytMusicSyncing: StateFlow<Boolean> = _ytMusicSyncing.asStateFlow()
+
     private val _serverNotice = MutableStateFlow<String?>(null)
     val serverNotice: StateFlow<String?> = _serverNotice.asStateFlow()
 
@@ -144,6 +163,15 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _hiddenGemsLoading = MutableStateFlow(false)
     val hiddenGemsLoading: StateFlow<Boolean> = _hiddenGemsLoading.asStateFlow()
+
+    private val _blindDiscoveryLoading = MutableStateFlow(false)
+    val blindDiscoveryLoading: StateFlow<Boolean> = _blindDiscoveryLoading.asStateFlow()
+
+    private val _aiCuratorState = MutableStateFlow(AiCuratorUiState())
+    val aiCuratorState: StateFlow<AiCuratorUiState> = _aiCuratorState.asStateFlow()
+
+    private val _translationProviderLabel = MutableStateFlow("")
+    val translationProviderLabel: StateFlow<String> = _translationProviderLabel.asStateFlow()
 
     private val _shazamState = MutableStateFlow(ShazamUiState())
     val shazamState: StateFlow<ShazamUiState> = _shazamState.asStateFlow()
@@ -514,13 +542,36 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
             if (result is SuccessResult) {
                 val bmp = result.image.toBitmap()
                 cachedArtworkBitmap = bmp
-                val p = Palette.from(bmp).generate()
-                val vibrant = p.getVibrantColor(0xFFA238FF.toInt())
-                val lightOrMuted = p.getLightVibrantColor(p.getMutedColor(0xFF00E5FF.toInt()))
-                _albumPrimary.value = Color(vibrant)
-                _albumSecondary.value = Color(lightOrMuted)
+                val p = Palette.from(bmp).maximumColorCount(24).generate()
+                val rawPrimary = p.vibrantSwatch?.rgb
+                    ?: p.lightVibrantSwatch?.rgb
+                    ?: p.dominantSwatch?.rgb
+                    ?: p.darkVibrantSwatch?.rgb
+                    ?: 0xFFA238FF.toInt()
+                val rawSecondary = p.lightVibrantSwatch?.rgb?.takeIf { it != rawPrimary }
+                    ?: p.darkVibrantSwatch?.rgb?.takeIf { it != rawPrimary }
+                    ?: p.mutedSwatch?.rgb?.takeIf { it != rawPrimary }
+                    ?: shiftHue(rawPrimary, 42f)
+
+                _albumPrimary.value = boostVividColor(rawPrimary, minSat = 0.60f, minVal = 0.78f)
+                _albumSecondary.value = boostVividColor(rawSecondary, minSat = 0.52f, minVal = 0.72f)
             }
         }
+    }
+
+    private fun boostVividColor(argb: Int, minSat: Float, minVal: Float): Color {
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(argb, hsv)
+        hsv[1] = hsv[1].coerceIn(minSat, 0.96f)
+        hsv[2] = hsv[2].coerceIn(minVal, 1.0f)
+        return Color(android.graphics.Color.HSVToColor(hsv))
+    }
+
+    private fun shiftHue(argb: Int, deltaDeg: Float): Int {
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(argb, hsv)
+        hsv[0] = (hsv[0] + deltaDeg) % 360f
+        return android.graphics.Color.HSVToColor(hsv)
     }
 
     fun translateCurrentLyrics() {
@@ -534,8 +585,161 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         if (sourceLines.isEmpty()) return
         viewModelScope.launch {
             _translatingLyrics.value = true
+            val aiCfg = serverState.value.aiConfig
+            if (aiCfg.isReady) {
+                val aiRes = aiClient.translateLyricsNaturalEs(aiCfg, track.title, track.artist, sourceLines)
+                if (aiRes.isSuccess) {
+                    _translatedLyrics.value = aiRes.getOrThrow()
+                    _translationProviderLabel.value = "IA (${aiCfg.provider.label})"
+                    _translatingLyrics.value = false
+                    return@launch
+                }
+            }
             _translatedLyrics.value = lyricsTranslator.translateLinesToSpanish(track.id, sourceLines)
+            _translationProviderLabel.value = "Traductor ES"
             _translatingLyrics.value = false
+        }
+    }
+
+    fun updateAiConfig(transform: (AiApiConfig) -> AiApiConfig) {
+        viewModelScope.launch {
+            serverRepo.update { s -> s.copy(aiConfig = transform(s.aiConfig)) }
+        }
+    }
+
+    fun testAiConnection() {
+        viewModelScope.launch {
+            _serverNotice.value = "⏳ Probando conexión con la IA..."
+            val res = aiClient.testConnection(serverState.value.aiConfig)
+            res.onSuccess { msg ->
+                _serverNotice.value = "✓ $msg"
+            }.onFailure { err ->
+                _serverNotice.value = "✕ IA: ${err.message ?: "Error de API"}"
+            }
+        }
+    }
+
+    fun generateAiRecommendations(customPrompt: String = "") {
+        val cfg = serverState.value.aiConfig
+        if (!cfg.isReady) {
+            _aiCuratorState.value = AiCuratorUiState(
+                loading = false,
+                error = "Configura tu API Key de IA (Gemini u OpenAI) en Configuración → Integración IA.",
+            )
+            return
+        }
+        viewModelScope.launch {
+            _aiCuratorState.value = _aiCuratorState.value.copy(loading = true, error = null, lastPrompt = customPrompt)
+            val stats = listeningStats.value
+            val topArtists = (stats.topArtists.map { it.first } + serverState.value.spotifyTaste.allSeedArtistNames).distinct()
+            val topTracks = stats.topTracks.map { "${it.first.title} - ${it.first.artist}" }
+            val recent = history.value.take(10).map { "${it.title} - ${it.artist}" }
+            val blocked = blockedArtists.value.map { it.displayName }
+
+            val recRes = aiClient.recommendTracksFromHistory(
+                config = cfg,
+                topArtists = topArtists,
+                topTracks = topTracks,
+                recentTracks = recent,
+                blockedArtists = blocked,
+                customPrompt = customPrompt,
+                count = 10,
+            )
+            recRes.onSuccess { suggestions ->
+                val blockedKeys = blockedArtists.value.map { it.artistKey }.toSet()
+                val resolved = mutableListOf<AiCuratedTrack>()
+                withContext(Dispatchers.IO) {
+                    suggestions.forEach { s ->
+                        val found = innerTube.searchSongs("${s.title} ${s.artist}", limit = 3)
+                            .firstOrNull { !HybridAlgorithmEngine.isBlockedArtist(it.artist, blockedKeys) }
+                        if (found != null) {
+                            resolved += AiCuratedTrack(track = found, reasonEs = s.reasonEs)
+                        }
+                    }
+                }
+                val clean = resolved.distinctBy { it.track.id }
+                _aiCuratorState.value = AiCuratorUiState(
+                    loading = false,
+                    items = clean,
+                    error = if (clean.isEmpty()) "No se pudieron encontrar coincidencias en el catálogo" else null,
+                    lastPrompt = customPrompt,
+                )
+            }.onFailure { err ->
+                _aiCuratorState.value = _aiCuratorState.value.copy(
+                    loading = false,
+                    error = err.message ?: "Error al consultar la IA",
+                )
+            }
+        }
+    }
+
+    fun playAiCuratedList(startTrack: Track? = null) {
+        val list = _aiCuratorState.value.items.map { it.track }
+        if (list.isEmpty()) return
+        val first = startTrack ?: list.first()
+        playerController.playTrack(first, list, autoFetchRadio = true)
+    }
+
+    /**
+     * Spotify-style 3-stage queue toggle on the shuffle button:
+     * 1) Shuffle -> 2) Repeat Only This Track -> 3) Smart Balanced Mix (1 Fav + 1 Known + 1 Discovery) -> Normal
+     */
+    fun cycleQueuePlayMode() {
+        playerController.cycleQueuePlayMode { currentTrack ->
+            val blockedKeys = blockedArtists.value.map { it.artistKey }.toSet()
+            val favs = favorites.value.shuffled()
+            val familiar = history.value.shuffled()
+            val knownIds = (favs.map { it.id } + familiar.map { it.id } + currentTrack.id).toSet()
+            val discovery = withContext(Dispatchers.IO) {
+                val radio = innerTube.fetchRadioQueue(currentTrack.id, limit = 24)
+                val fresh = radio.filter { it.id !in knownIds && !HybridAlgorithmEngine.isBlockedArtist(it.artist, blockedKeys) }
+                if (fresh.size >= 6) fresh else {
+                    val fallback = _homeFeed.value.quickPicks + _homeFeed.value.shelves.flatMap { it.tracks }
+                    (fresh + hybridEngine.buildHiddenGemsRadar(
+                        knownTrackIds = knownIds,
+                        blockedArtistKeys = blockedKeys,
+                        spotifyTaste = serverState.value.spotifyTaste.takeIf { serverState.value.isSpotifyConnected },
+                        localHistory = familiar,
+                        fallbackTracks = fallback,
+                    )).distinctBy { it.id }
+                }
+            }
+            HybridAlgorithmEngine.buildSmartBalancedQueue(
+                currentTrack = currentTrack,
+                favorites = favs,
+                familiarHistory = familiar,
+                discoveryPool = discovery,
+                blockedArtistKeys = blockedKeys,
+            )
+        }
+    }
+
+    /**
+     * Blind Discovery Mode (45s ??? mystery blur + progressive reveal on every track!).
+     */
+    fun startBlindDiscoveryMode() {
+        viewModelScope.launch {
+            _blindDiscoveryLoading.value = true
+            val session = serverState.value
+            val knownIds = (history.value.map { it.id } + favorites.value.map { it.id }).toSet()
+            val blockedKeys = blockedArtists.value.map { it.artistKey }.toSet()
+            val fallback = _homeFeed.value.quickPicks + _homeFeed.value.shelves.flatMap { it.tracks }
+            val mysteryTracks = hybridEngine.buildHiddenGemsRadar(
+                knownTrackIds = knownIds,
+                blockedArtistKeys = blockedKeys,
+                spotifyTaste = session.spotifyTaste.takeIf { session.isSpotifyConnected },
+                localHistory = history.value,
+                fallbackTracks = fallback,
+            ).ifEmpty { fallback.shuffled().take(15) }
+            _blindDiscoveryLoading.value = false
+            if (mysteryTracks.isNotEmpty()) {
+                playerController.playTrack(
+                    track = mysteryTracks.first(),
+                    newQueue = mysteryTracks,
+                    autoFetchRadio = true,
+                    blindDiscovery = true,
+                )
+            }
         }
     }
 
@@ -963,7 +1167,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun connectYtMusicCookie(cookie: String) {
         viewModelScope.launch {
-            _serverNotice.value = "..."
+            _serverNotice.value = "⏳ Conectando cuenta de YouTube Music..."
             val res = innerTube.verifyYtMusicAccount(cookie)
             res.onSuccess { accountName ->
                 serverRepo.update { s ->
@@ -971,11 +1175,97 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                     innerTube.updateServerConfig(cfg)
                     s.copy(serverConfig = cfg)
                 }
-                _serverNotice.value = "✓ YouTube Music: $accountName"
-                refreshHome()
+                _serverNotice.value = "✓ YouTube Music conectado: $accountName"
+                syncYtMusicLibrary()
             }.onFailure { err ->
                 _serverNotice.value = "✕ ${err.message ?: "Error al conectar YT Music"}"
             }
+        }
+    }
+
+    fun syncYtMusicLibrary() {
+        viewModelScope.launch {
+            if (!serverState.value.isYtMusicConnected) return@launch
+            _ytMusicSyncing.value = true
+            _serverNotice.value = "⏳ Sincronizando biblioteca real de YouTube Music..."
+            val syncRes = innerTube.syncYtMusicAccountLibrary()
+            syncRes.onSuccess { snap ->
+                withContext(Dispatchers.IO) {
+                    val existingFavIds = favorites.value.map { it.id }.toSet()
+                    snap.likedSongs.forEach { t ->
+                        if (t.id !in existingFavIds) {
+                            dao.addFavorite(
+                                FavoriteTrackEntity(
+                                    id = t.id,
+                                    title = t.title,
+                                    artist = t.artist,
+                                    album = t.album,
+                                    durationSeconds = t.durationSeconds,
+                                    thumbnailUrl = t.thumbnailUrl,
+                                ),
+                            )
+                        }
+                    }
+                    snap.historyTracks.forEach { t ->
+                        val cur = dao.getHistoryById(t.id)
+                        if (cur == null) {
+                            dao.upsertHistory(
+                                HistoryTrackEntity(
+                                    id = t.id,
+                                    title = t.title,
+                                    artist = t.artist,
+                                    album = t.album,
+                                    durationSeconds = t.durationSeconds,
+                                    thumbnailUrl = t.thumbnailUrl,
+                                    playCount = 1,
+                                ),
+                            )
+                        }
+                    }
+                }
+                val summary = "${snap.likedSongs.size} Me gusta • ${snap.playlists.size} Playlists • ${snap.historyTracks.size} Historial"
+                serverRepo.update { s ->
+                    s.copy(
+                        ytMusicPlaylists = snap.playlists,
+                        ytMusicSyncSummary = summary,
+                    )
+                }
+                _serverNotice.value = "✓ YT Music sincronizado: $summary"
+                refreshHome()
+            }.onFailure { err ->
+                _serverNotice.value = "✕ Sync YT Music: ${err.message ?: "Error de red"}"
+            }
+            _ytMusicSyncing.value = false
+        }
+    }
+
+    fun importYtMusicPlaylist(playlist: YtMusicPlaylistSummary) {
+        viewModelScope.launch {
+            _ytMusicSyncing.value = true
+            _serverNotice.value = "⏳ Importando «${playlist.title}» de YT Music..."
+            val res = innerTube.fetchYtMusicPlaylistTracks(playlist.browseId)
+            res.onSuccess { tracks ->
+                withContext(Dispatchers.IO) {
+                    val pid = dao.insertPlaylist(UserPlaylistEntity(name = "${playlist.title} (YT Music)"))
+                    tracks.forEach { t ->
+                        dao.addTrackToPlaylist(
+                            PlaylistTrackEntity(
+                                playlistId = pid,
+                                trackId = t.id,
+                                title = t.title,
+                                artist = t.artist,
+                                album = t.album,
+                                durationSeconds = t.durationSeconds,
+                                thumbnailUrl = t.thumbnailUrl,
+                            ),
+                        )
+                    }
+                }
+                _serverNotice.value = "✓ «${playlist.title}» importada (${tracks.size} temas)"
+            }.onFailure { err ->
+                _serverNotice.value = "✕ ${err.message ?: "Error al importar playlist"}"
+            }
+            _ytMusicSyncing.value = false
         }
     }
 
@@ -984,7 +1274,11 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
             serverRepo.update { s ->
                 val cfg = s.serverConfig.copy(ytMusicCookie = "", ytMusicAccountName = "")
                 innerTube.updateServerConfig(cfg)
-                s.copy(serverConfig = cfg)
+                s.copy(
+                    serverConfig = cfg,
+                    ytMusicPlaylists = emptyList(),
+                    ytMusicSyncSummary = "",
+                )
             }
             _serverNotice.value = null
             refreshHome()

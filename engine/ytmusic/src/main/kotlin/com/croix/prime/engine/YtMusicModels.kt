@@ -124,6 +124,22 @@ data class HomeFeedBundle(
     val shelves: List<HomeSection> = emptyList(),
 )
 
+@Serializable
+data class YtMusicPlaylistSummary(
+    val browseId: String,
+    val title: String,
+    val subtitle: String = "",
+    val thumbnailUrl: String = "",
+)
+
+@Serializable
+data class YtMusicLibrarySyncSnapshot(
+    val likedSongs: List<Track> = emptyList(),
+    val historyTracks: List<Track> = emptyList(),
+    val playlists: List<YtMusicPlaylistSummary> = emptyList(),
+    val syncedAtEpochMs: Long = System.currentTimeMillis(),
+)
+
 data class ResolvedStream(
     val url: String,
     val mimeType: String,

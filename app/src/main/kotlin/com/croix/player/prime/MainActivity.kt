@@ -124,6 +124,9 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val homeFeed by vm.homeFeed.collectAsState()
     val homeLoading by vm.homeLoading.collectAsState()
     val hiddenGemsLoading by vm.hiddenGemsLoading.collectAsState()
+    val blindDiscoveryLoading by vm.blindDiscoveryLoading.collectAsState()
+    val aiCurator by vm.aiCuratorState.collectAsState()
+    val translationProviderLabel by vm.translationProviderLabel.collectAsState()
     val updateInfo by vm.updateInfo.collectAsState()
     val favorites by vm.favorites.collectAsState()
     val history by vm.history.collectAsState()
@@ -156,6 +159,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val serverHealth by vm.serverHealth.collectAsState()
     val adsBlockedCount by vm.adsBlockedCount.collectAsState()
     val spotifySyncing by vm.spotifySyncing.collectAsState()
+    val ytMusicSyncing by vm.ytMusicSyncing.collectAsState()
     val serverNotice by vm.serverNotice.collectAsState()
     val audioCacheBytes by vm.audioCacheBytes.collectAsState()
     val shazamState by vm.shazamState.collectAsState()
@@ -270,12 +274,21 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                                 moods = vm.moods,
                                 favoriteIds = favoriteIds,
                                 spotifyConnected = serverState.isSpotifyConnected,
+                                aiReady = serverState.aiConfig.isReady,
+                                aiCurator = aiCurator,
                                 privateSessionEnabled = design.privateSessionEnabled,
                                 hiddenGemsLoading = hiddenGemsLoading,
+                                blindDiscoveryLoading = blindDiscoveryLoading,
                                 isLoading = homeLoading,
                                 bottomPaddingDp = bottomClearance,
                                 onPlayFlow = vm::startCroixFlow,
                                 onStartHiddenGems = vm::startHiddenGemsRadar,
+                                onStartBlindDiscovery = {
+                                    vm.startBlindDiscoveryMode()
+                                    playerExpanded = true
+                                },
+                                onGenerateAiCurator = vm::generateAiRecommendations,
+                                onPlayAiCurated = vm::playAiCuratedList,
                                 onOpenShazam = { triggerShazamListen() },
                                 onTogglePrivateSession = {
                                     vm.updateDesign { it.copy(privateSessionEnabled = !it.privateSessionEnabled) }
@@ -461,6 +474,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     lyricsLoading = lyricsLoading,
                     translatedLyrics = translatedLyrics,
                     translatingLyrics = translatingLyrics,
+                    translationProviderLabel = translationProviderLabel,
                     isFavorite = playback.currentTrack?.id in favoriteIds,
                     isDownloaded = playback.currentTrack?.id in downloadedIds,
                     downloadProgress = playback.currentTrack?.id?.let { downloadProgress[it] },
@@ -471,8 +485,11 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onSeekRelative = vm.playerController::seekRelative,
                     onNext = vm.playerController::skipNext,
                     onPrev = vm.playerController::skipPrevious,
-                    onToggleShuffle = vm.playerController::toggleShuffle,
-                    onToggleRepeat = vm.playerController::toggleRepeatOne,
+                    onCycleQueueMode = vm::cycleQueuePlayMode,
+                    onToggleKaraoke = vm.playerController::setKaraokeEnabled,
+                    onSetKaraokeStrength = vm.playerController::setKaraokeStrength,
+                    onRevealBlindTrack = vm.playerController::revealBlindTrackNow,
+                    onExitBlindMode = vm.playerController::exitBlindDiscoveryMode,
                     onToggleFavorite = vm::toggleFavorite,
                     onDownloadTrack = vm::downloadTrack,
                     onRequestAddToPlaylist = { trackForPlaylistDialog = it },
@@ -526,6 +543,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     serverHealth = serverHealth,
                     adsBlockedCount = adsBlockedCount,
                     spotifySyncing = spotifySyncing,
+                    ytMusicSyncing = ytMusicSyncing,
                     serverNotice = serverNotice,
                     updateInfo = updateInfo,
                     audioCacheBytes = audioCacheBytes,
@@ -537,6 +555,8 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onSetSpeed = vm.playerController::setPlaybackSpeed,
                     onSetPitch = vm.playerController::setPlaybackPitch,
                     onSetSkipSilence = vm.playerController::setSkipSilence,
+                    onSetKaraokeEnabled = vm.playerController::setKaraokeEnabled,
+                    onSetKaraokeStrength = vm.playerController::setKaraokeStrength,
                     onSetAudio8dEnabled = vm.playerController::setAudio8dEnabled,
                     onSetAudio8dSpeed = vm.playerController::setAudio8dSpeed,
                     onSetReverbMode = vm.playerController::setReverbMode,
@@ -551,9 +571,13 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onUnblockArtist = vm::unblockArtist,
                     onUpdateIntegrations = vm::updateIntegrations,
                     onLoginLastFm = vm::authenticateLastFm,
+                    onUpdateAiConfig = vm::updateAiConfig,
+                    onTestAiConnection = vm::testAiConnection,
                     onUpdateServerConfig = vm::updateServerConfig,
                     onPingServer = vm::pingServer,
                     onOpenYtMusicLogin = { ytMusicLoginOpen = true },
+                    onSyncYtMusicNow = vm::syncYtMusicLibrary,
+                    onImportYtMusicPlaylist = vm::importYtMusicPlaylist,
                     onDisconnectYtMusic = vm::disconnectYtMusic,
                     onOpenSpotifyLogin = { spotifyLoginOpen = true },
                     onConnectSpotifyManual = { dc -> vm.connectSpotifyCookies(dc) },

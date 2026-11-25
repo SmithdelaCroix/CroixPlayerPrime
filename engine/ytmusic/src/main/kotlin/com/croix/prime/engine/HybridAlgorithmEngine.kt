@@ -412,6 +412,60 @@ class HybridAlgorithmEngine(
             return accepted
         }
 
+        /**
+         * Spotify-style Smart Shuffle Mix Queue (3rd mode on the shuffle button):
+         * Strict balanced cycle: 1 Favorite -> 1 Familiar (History) -> 1 New Discovery -> repeat!
+         */
+        fun buildSmartBalancedQueue(
+            currentTrack: Track,
+            favorites: List<Track>,
+            familiarHistory: List<Track>,
+            discoveryPool: List<Track>,
+            blockedArtistKeys: Set<String> = emptySet(),
+            limit: Int = 27,
+        ): List<Track> {
+            val out = mutableListOf(currentTrack)
+            val used = mutableListOf(currentTrack)
+
+            fun pickNext(pool: MutableList<Track>): Track? {
+                val iter = pool.iterator()
+                while (iter.hasNext()) {
+                    val t = iter.next()
+                    iter.remove()
+                    if (isBlockedArtist(t.artist, blockedArtistKeys)) continue
+                    if (used.any { isSameSongVariant(it, t) }) continue
+                    used.add(t)
+                    return t
+                }
+                return null
+            }
+
+            val favQueue = favorites.filterNot { isBlockedArtist(it.artist, blockedArtistKeys) }.toMutableList()
+            val favIds = favQueue.map { it.id }.toSet()
+            val knownQueue = familiarHistory
+                .filter { it.id !in favIds && !isBlockedArtist(it.artist, blockedArtistKeys) }
+                .toMutableList()
+            val knownIds = (favIds + knownQueue.map { it.id })
+            val discQueue = discoveryPool
+                .filter { it.id !in knownIds && !isBlockedArtist(it.artist, blockedArtistKeys) }
+                .toMutableList()
+
+            val pools = listOf(favQueue, knownQueue, discQueue)
+            var slot = 0
+            var stalled = 0
+            while (out.size < limit && stalled < 3) {
+                val chosen = pickNext(pools[slot % 3])
+                if (chosen != null) {
+                    out.add(chosen)
+                    stalled = 0
+                } else {
+                    stalled++
+                }
+                slot++
+            }
+            return out
+        }
+
         fun isBlockedArtist(artistRaw: String, blockedArtistKeys: Set<String>): Boolean {
             if (blockedArtistKeys.isEmpty() || artistRaw.isBlank()) return false
             val full = artistRaw.trim().lowercase()

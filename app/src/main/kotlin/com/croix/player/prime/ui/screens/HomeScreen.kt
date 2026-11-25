@@ -41,13 +41,17 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.QuestionMark
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -67,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.croix.player.prime.ui.AiCuratorUiState
 import com.croix.prime.design.CroixGlassCard
 import com.croix.prime.design.LocalCroixDesign
 import com.croix.prime.design.LocalCroixPalette
@@ -87,12 +92,18 @@ fun HomeScreen(
     moods: List<MoodChip>,
     favoriteIds: Set<String>,
     spotifyConnected: Boolean,
+    aiReady: Boolean,
+    aiCurator: AiCuratorUiState,
     privateSessionEnabled: Boolean,
     hiddenGemsLoading: Boolean,
+    blindDiscoveryLoading: Boolean,
     isLoading: Boolean,
     bottomPaddingDp: Int,
     onPlayFlow: (MoodChip?) -> Unit,
     onStartHiddenGems: () -> Unit,
+    onStartBlindDiscovery: () -> Unit,
+    onGenerateAiCurator: (String) -> Unit,
+    onPlayAiCurated: (Track?) -> Unit,
     onOpenShazam: () -> Unit,
     onTogglePrivateSession: () -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
@@ -394,70 +405,204 @@ fun HomeScreen(
             }
         }
 
-        // 2b. Radar de Joyas Ocultas (100% Pure Discovery Card excluding all played/favorited tracks!)
+        // 2b. Discovery Duo: Radar de Joyas Ocultas + Descubrimiento a Ciegas (45s ???)
         item {
-            CroixGlassCard(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp),
-                accentTint = Color(0xFF00E5FF),
-                onClick = { if (!hiddenGemsLoading) onStartHiddenGems() },
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(
-                                    Color(0xFF00E5FF).copy(alpha = 0.28f),
-                                    Color(0xFF7C4DFF).copy(alpha = 0.22f),
-                                    Color.Transparent,
-                                ),
-                            ),
-                        )
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                CroixGlassCard(
+                    modifier = Modifier.weight(1f),
+                    accentTint = Color(0xFF00E5FF),
+                    onClick = { if (!hiddenGemsLoading) onStartHiddenGems() },
                 ) {
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF00E5FF).copy(alpha = 0.24f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (hiddenGemsLoading) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(22.dp),
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color(0xFF00E5FF).copy(alpha = 0.28f), Color.Transparent),
+                                ),
                             )
-                        } else {
-                            Icon(Icons.Rounded.Explore, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(26.dp))
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier.size(38.dp).clip(CircleShape).background(Color(0xFF00E5FF).copy(alpha = 0.22f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (hiddenGemsLoading) {
+                                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                            } else {
+                                Icon(Icons.Rounded.Explore, null, tint = Color(0xFF00E5FF), modifier = Modifier.size(22.dp))
+                            }
                         }
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (strings.isSpanish) "Radar de Joyas Ocultas" else "Hidden Gems Radar",
+                            text = if (strings.isSpanish) "Joyas Ocultas" else "Hidden Gems",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White,
+                            maxLines = 1,
                         )
                         Text(
-                            text = if (strings.isSpanish) "Descubrimiento puro: 0 canciones repetidas de tu historial" else "Pure discovery: 0 repeated tracks from your history",
+                            text = if (strings.isSpanish) "0 canciones repetidas de tu historial" else "0 repeated tracks",
                             style = MaterialTheme.typography.bodySmall,
                             color = palette.textSecondary,
                             maxLines = 2,
                         )
                     }
-                    Box(
+                }
+
+                CroixGlassCard(
+                    modifier = Modifier.weight(1f),
+                    accentTint = Color(0xFFFF4081),
+                    onClick = { if (!blindDiscoveryLoading) onStartBlindDiscovery() },
+                ) {
+                    Column(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.16f)),
-                        contentAlignment = Alignment.Center,
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color(0xFFFF4081).copy(alpha = 0.28f), Color(0xFF7C4DFF).copy(alpha = 0.16f)),
+                                ),
+                            )
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        Box(
+                            modifier = Modifier.size(38.dp).clip(CircleShape).background(Color(0xFFFF4081).copy(alpha = 0.24f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (blindDiscoveryLoading) {
+                                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                            } else {
+                                Icon(Icons.Rounded.QuestionMark, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                            }
+                        }
+                        Text(
+                            text = if (strings.isSpanish) "Modo Misterio ???" else "Blind Mode ???",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = if (strings.isSpanish) "45s ocultos y revelación progresiva" else "45s blurred, then gradual reveal",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.textSecondary,
+                            maxLines = 2,
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2c. AI Music Curator Card (powered by user's Gemini / OpenAI API key!)
+        item {
+            var aiPromptInput by remember { mutableStateOf("") }
+            CroixGlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
+                accentTint = Color(0xFF7C4DFF),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(15.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Rounded.Psychology, null, tint = Color(0xFFB388FF), modifier = Modifier.size(22.dp))
+                            Column {
+                                Text(
+                                    if (strings.isSpanish) "Curador Musical IA" else "AI Music Curator",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White,
+                                )
+                                Text(
+                                    if (aiReady) {
+                                        if (strings.isSpanish) "Recomienda según tu historial y estado de ánimo" else "Recommends based on your history & mood"
+                                    } else {
+                                        if (strings.isSpanish) "Conecta tu API de Gemini u OpenAI en Configuración" else "Connect Gemini or OpenAI API in Settings"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = palette.textSecondary,
+                                )
+                            }
+                        }
+                        if (aiCurator.loading) {
+                            CircularProgressIndicator(color = Color(0xFFB388FF), strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        }
+                    }
+
+                    if (!aiReady) {
+                        Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (strings.isSpanish) "Configurar API de IA" else "Configure AI API")
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = aiPromptInput,
+                                onValueChange = { aiPromptInput = it },
+                                placeholder = { Text("Ej: noche lluviosa, indie chill...", maxLines = 1) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                enabled = !aiCurator.loading,
+                                onClick = { onGenerateAiCurator(aiPromptInput) },
+                            ) { Text("Pedir IA") }
+                        }
+                        if (aiCurator.error != null) {
+                            Text(aiCurator.error, color = Color(0xFFFF8A80), style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (aiCurator.items.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("${aiCurator.items.size} recomendaciones IA", color = Color(0xFFB388FF), style = MaterialTheme.typography.labelMedium)
+                                CroixGlassCard(cornerRadius = 50.dp, accentTint = palette.primary, onClick = { onPlayAiCurated(null) }) {
+                                    Text("Reproducir todo", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                                }
+                            }
+                            aiCurator.items.take(4).forEach { rec ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { onPlayAiCurated(rec.track) }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    AsyncImage(
+                                        model = rec.track.thumbnailUrl,
+                                        contentDescription = rec.track.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(42.dp).clip(RoundedCornerShape(8.dp)),
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(rec.track.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            if (rec.reasonEs.isNotBlank()) "${rec.track.artist} • ${rec.reasonEs}" else rec.track.artist,
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

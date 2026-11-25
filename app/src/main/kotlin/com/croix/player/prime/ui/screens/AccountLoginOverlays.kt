@@ -223,6 +223,7 @@ fun YtMusicLoginOverlay(
     val strings = LocalCroixStrings.current
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var captured by remember { mutableStateOf(false) }
+    var manualCookie by remember { mutableStateOf("") }
     val blocker = remember { MutableInteractionSource() }
 
     DisposableEffect(Unit) {
@@ -259,11 +260,36 @@ fun YtMusicLoginOverlay(
             Column {
                 Text(strings.connectYtMusic, style = MaterialTheme.typography.titleLarge, color = Color.White)
                 Text(
-                    if (strings.isSpanish) "Conecta tu cuenta para recomendaciones sin anuncios" else "Connect your account for personalized ad-free feeds",
+                    if (strings.isSpanish) "Sincroniza tus Me gusta, Playlists e Historial reales" else "Sync your real Liked Songs, Playlists & History",
                     style = MaterialTheme.typography.bodySmall,
                     color = palette.textSecondary,
                 )
             }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = manualCookie,
+                onValueChange = { manualCookie = it },
+                placeholder = { Text("Cookie YT Music con SAPISID (opcional)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                enabled = manualCookie.contains("SAPISID"),
+                onClick = {
+                    if (!captured && manualCookie.isNotBlank()) {
+                        captured = true
+                        onCookieCaptured(manualCookie.trim())
+                    }
+                },
+            ) { Text("OK") }
         }
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -280,12 +306,19 @@ fun YtMusicLoginOverlay(
                         webViewClient = object : WebViewClient() {
                             private fun checkCookies(url: String?) {
                                 if (captured) return
-                                if (url?.contains("music.youtube.com") != true) return
+                                if (url?.contains("music.youtube.com") != true && url?.contains("youtube.com") != true) return
                                 cm.flush()
-                                val raw = cm.getCookie("https://music.youtube.com").orEmpty()
-                                if (raw.contains("SAPISID=") || raw.contains("__Secure-3PAPISID=")) {
+                                val rawMusic = cm.getCookie("https://music.youtube.com").orEmpty()
+                                val rawYt = cm.getCookie("https://www.youtube.com").orEmpty()
+                                val merged = listOf(rawMusic, rawYt)
+                                    .flatMap { it.split(";") }
+                                    .map { it.trim() }
+                                    .filter { it.contains("=") }
+                                    .distinctBy { it.substringBefore("=") }
+                                    .joinToString("; ")
+                                if (merged.contains("SAPISID=") || merged.contains("__Secure-3PAPISID=")) {
                                     captured = true
-                                    onCookieCaptured(raw)
+                                    onCookieCaptured(merged)
                                 }
                             }
 

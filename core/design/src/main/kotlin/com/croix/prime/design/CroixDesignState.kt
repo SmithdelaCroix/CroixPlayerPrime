@@ -21,7 +21,7 @@ import kotlinx.serialization.json.Json
 enum class PrimeColorMode(val label: String) {
     VIOLET_GLASS("Cristal Violeta"),
     NEON_CYAN("Neón Cian"),
-    ALBUM_MORPH("Carátula Viva"),
+    ALBUM_MORPH("Color de la canción"),
     DYNAMIC_SYSTEM("Material You"),
     AMOLED_BLACK("AMOLED Negro"),
     CUSTOM_GRADIENT("Color Libre"),
@@ -164,10 +164,11 @@ data class CroixDesignState(
     val transitionSpeed: Float = 1.0f,
     val crossfadeSeconds: Int = 0,
     val languageMode: PrimeLanguageMode = PrimeLanguageMode.SPANISH,
-    // v4.0 Prime Pro Features (Cache, Canvas, 3D Parallax, Private Mode, App Icon, Output Profiles)
+    // v4.0 / v4.5 Prime Pro Features (Cache, Canvas, 3D Parallax BETA, Private Mode, App Icon, Output Profiles)
     val audioCacheLimitMb: Int = 512,
     val canvasMotionEnabled: Boolean = true,
-    val artworkParallax3d: Boolean = true,
+    val artworkParallax3d: Boolean = false,
+    val parallax3dIntensity: Float = 1.35f,
     val privateSessionEnabled: Boolean = false,
     val appIconId: String = "violet",
     val autoOutputProfilesEnabled: Boolean = true,
@@ -199,6 +200,7 @@ data class CroixDesignState(
         transitionSpeed = transitionSpeed.coerceIn(0.5f, 2.0f),
         crossfadeSeconds = crossfadeSeconds.coerceIn(0, 10),
         audioCacheLimitMb = audioCacheLimitMb.coerceIn(0, 4096),
+        parallax3dIntensity = parallax3dIntensity.coerceIn(0.5f, 2.2f),
     )
 
     val customPrimaryFromHue: Color

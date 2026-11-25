@@ -38,6 +38,10 @@ import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request as NpRequest
 import org.schabi.newpipe.extractor.downloader.Response as NpResponse
+import org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -61,6 +65,13 @@ class InnerTubeClient(
     }
 
     private val streamCache = ConcurrentHashMap<String, ResolvedStream>()
+    private val failedClientsByVideo = ConcurrentHashMap<String, MutableSet<String>>()
+
+    @Volatile
+    private var cachedVisitorData: String? = null
+
+    @Volatile
+    private var lastSuccessfulClientKey: String? = null
 
     @Volatile
     var serverConfig: ServerConnectionConfig = ServerConnectionConfig()
@@ -69,6 +80,36 @@ class InnerTubeClient(
         val modeChanged = serverConfig.mode != config.mode || serverConfig.activeRelayUrl != config.activeRelayUrl
         serverConfig = config
         if (modeChanged) streamCache.clear()
+    }
+
+    fun markStreamClientFailed(videoId: String, clientKey: String) {
+        if (clientKey.isBlank()) return
+        failedClientsByVideo.computeIfAbsent(videoId) { ConcurrentHashMap.newKeySet() }.add(clientKey)
+        streamCache.remove(videoId)
+        if (lastSuccessfulClientKey == clientKey) {
+            lastSuccessfulClientKey = null
+        }
+    }
+
+    fun invalidateStreamCache(videoId: String) {
+        streamCache.remove(videoId)
+    }
+
+    private suspend fun ensureVisitorData(): String? {
+        cachedVisitorData?.takeIf { it.isNotBlank() }?.let { return it }
+        return runCatching {
+            val raw = http.get("https://music.youtube.com/sw.js_data") {
+                header("User-Agent", YtPlaybackClient.USER_AGENT_WEB_REMIX)
+                header("Origin", YtPlaybackClient.ORIGIN_YOUTUBE_MUSIC)
+                header("Referer", "${YtPlaybackClient.ORIGIN_YOUTUBE_MUSIC}/")
+            }.bodyAsText()
+            val cleaned = raw.removePrefix(")]}'")
+            val match = Regex("""["'](Cg[A-Za-z0-9_\-%]{12,})["']""").find(cleaned)?.groupValues?.get(1)
+            if (!match.isNullOrBlank()) {
+                cachedVisitorData = match
+            }
+            cachedVisitorData
+        }.getOrNull()
     }
 
     suspend fun pingActiveServer(): ServerHealthStatus = withContext(Dispatchers.IO) {
@@ -518,55 +559,146 @@ class InnerTubeClient(
         }.getOrElse { emptyList() }
     }
 
-    suspend fun resolveAudioStream(videoId: String): Result<ResolvedStream> = withContext(Dispatchers.IO) {
-        streamCache[videoId]?.takeIf { it.expiresAtEpochMs > System.currentTimeMillis() + 60_000L }?.let {
-            return@withContext Result.success(it)
-        }
-
-        val cfg = serverConfig
-        // Strategy 0: Optional Piped Relay / Custom Server when configured by the user
-        if (cfg.mode != YtMusicServerMode.DIRECT_ADFREE && cfg.activeRelayUrl.startsWith("http")) {
-            val relayStream = runCatching { fetchPipedAudioStream(cfg.activeRelayUrl, videoId) }.getOrNull()
-            if (relayStream != null) {
-                streamCache[videoId] = relayStream
-                return@withContext Result.success(relayStream)
+    /**
+     * Metrolist-grade multi-client audio stream resolver:
+     * 1. Bootstraps visitorData + remembers last healthy client.
+     * 2. Walks the verified 2026 fallback ladder (VISIONOS -> ANDROID_VR -> IOS -> IOS_MUSIC -> IPADOS -> ANDROID_TESTSUITE -> ANDROID_MUSIC -> MOBILE -> ANDROID_CREATOR -> TVHTML5 -> WEB_REMIX).
+     * 3. Handles direct URLs, ?n= throttling deobfuscation, signatureCipher deciphering, and cver patching.
+     * 4. Probes candidate stream URLs with `Range: bytes=0-1` and exact client headers so dead/403 streams are skipped before ExoPlayer ever sees them!
+     * 5. Falls back to NewPipeExtractor & Piped Relay if all direct clients are blocked on the current IP.
+     */
+    suspend fun resolveAudioStream(
+        videoId: String,
+        bypassCache: Boolean = false,
+        excludedClientKeys: Set<String> = emptySet(),
+    ): Result<ResolvedStream> = withContext(Dispatchers.IO) {
+        if (!bypassCache) {
+            streamCache[videoId]?.takeIf {
+                it.expiresAtEpochMs > System.currentTimeMillis() + 60_000L && it.clientKey !in excludedClientKeys
+            }?.let {
+                return@withContext Result.success(it)
             }
         }
 
-        // Strategy 1: Direct InnerTube ANDROID_VR client (ad-free direct audio URLs without signature cipher)
-        val vrStream = runCatching { fetchDirectPlayerStream(videoId, clientName = "ANDROID_VR", clientVersion = "1.60.19") }.getOrNull()
-        if (vrStream != null) {
-            streamCache[videoId] = vrStream
-            return@withContext Result.success(vrStream)
+        val cfg = serverConfig
+        val blocked = buildSet {
+            addAll(excludedClientKeys)
+            failedClientsByVideo[videoId]?.let(::addAll)
+        }
+        val diagnostics = mutableListOf<String>()
+
+        // Strategy 0: Optional Piped Relay / Custom Server when explicitly selected by user
+        if (cfg.mode != YtMusicServerMode.DIRECT_ADFREE && cfg.activeRelayUrl.startsWith("http")) {
+            val relayStream = runCatching { fetchPipedAudioStream(cfg.activeRelayUrl, videoId) }.getOrNull()
+            if (relayStream != null && probeStreamUrl(relayStream)) {
+                streamCache[videoId] = relayStream
+                return@withContext Result.success(relayStream)
+            }
+            diagnostics += "PIPED_RELAY:no_stream"
         }
 
-        // Strategy 2: Direct InnerTube IOS client
-        val iosStream = runCatching { fetchDirectPlayerStream(videoId, clientName = "IOS", clientVersion = "20.10.4") }.getOrNull()
-        if (iosStream != null) {
-            streamCache[videoId] = iosStream
-            return@withContext Result.success(iosStream)
+        val visitorData = ensureVisitorData()
+        val hasLogin = cfg.hasYtMusicAccount
+
+        // Build ordered Metrolist client ladder:
+        // VISIONOS fast-path -> lastSuccessful -> rest of ladder (login-capable prioritized if signed in)
+        val orderedClients = buildList {
+            add(YtPlaybackClient.VISIONOS)
+            lastSuccessfulClientKey?.let { key ->
+                YtPlaybackClient.PLAYBACK_LADDER.firstOrNull { it.key == key }?.let(::add)
+            }
+            if (hasLogin) {
+                addAll(YtPlaybackClient.PLAYBACK_LADDER.filter { it.loginSupported })
+                addAll(YtPlaybackClient.PLAYBACK_LADDER.filterNot { it.loginSupported })
+            } else {
+                addAll(YtPlaybackClient.PLAYBACK_LADDER)
+            }
+        }.distinctBy { it.key }.filterNot { it.key in blocked }
+
+        var lazySigTimestamp: Int? = null
+        var fetchedSigTimestamp = false
+
+        for (client in orderedClients) {
+            if (client.loginRequired && !hasLogin) continue
+            val sigTs = if (client.useSignatureTimestamp) {
+                if (!fetchedSigTimestamp) {
+                    fetchedSigTimestamp = true
+                    lazySigTimestamp = fetchSignatureTimestampOrNull(videoId)
+                }
+                lazySigTimestamp
+            } else {
+                null
+            }
+
+            val candidate = runCatching {
+                fetchPlayerStreamWithClient(
+                    videoId = videoId,
+                    client = client,
+                    visitorData = visitorData,
+                    signatureTimestamp = sigTs,
+                    useLogin = hasLogin && client.loginSupported,
+                )
+            }.onFailure { err ->
+                diagnostics += "${client.key}:${err.message?.take(40) ?: err.javaClass.simpleName}"
+            }.getOrNull()
+
+            if (candidate != null) {
+                val ok = probeStreamUrl(candidate)
+                if (ok) {
+                    lastSuccessfulClientKey = client.key
+                    streamCache[videoId] = candidate
+                    return@withContext Result.success(candidate)
+                } else {
+                    diagnostics += "${client.key}:probe_403"
+                }
+            }
         }
 
-        // Strategy 3: NewPipeExtractor fallback (handles JS signature deciphering automatically)
-        runCatching {
+        // Strategy Fallback A: NewPipeExtractor full page stream extraction (independent extractor)
+        val newPipeStream = runCatching {
             val url = "https://www.youtube.com/watch?v=$videoId"
             val extractor = ServiceList.YouTube.getStreamExtractor(url)
             extractor.fetchPage()
-            val best = extractor.audioStreams
+            val candidates = extractor.audioStreams
                 .filter { !it.content.isNullOrBlank() && (!cfg.strictAdBlockEnabled || !AdBlockEngine.isAdTrackingStreamUrl(it.content)) }
-                .maxByOrNull { it.averageBitrate }
-                ?: error("No playable audio stream found for $videoId")
-            ResolvedStream(
-                url = best.content,
-                mimeType = best.format?.mimeType ?: "audio/mp4",
-                bitrate = best.averageBitrate,
-            ).also { streamCache[videoId] = it }
+                .sortedByDescending { it.averageBitrate }
+            candidates.firstNotNullOfOrNull { s ->
+                val headers = YtPlaybackClient.resolveHeadersForStreamUrl(s.content)
+                val resolved = ResolvedStream(
+                    url = s.content,
+                    mimeType = s.format?.mimeType ?: "audio/mp4",
+                    bitrate = s.averageBitrate,
+                    clientKey = "NEWPIPE",
+                    userAgent = headers.userAgent,
+                    origin = headers.origin,
+                    referer = headers.referer,
+                )
+                if (probeStreamUrl(resolved)) resolved else null
+            }
+        }.onFailure { err ->
+            diagnostics += "NEWPIPE:${err.message?.take(40) ?: err.javaClass.simpleName}"
+        }.getOrNull()
+
+        if (newPipeStream != null) {
+            streamCache[videoId] = newPipeStream
+            return@withContext Result.success(newPipeStream)
         }
+
+        // Strategy Fallback B: Public Piped relay nodes as last resort
+        for (node in ServerPresets.PipedNodes.take(2)) {
+            val relay = runCatching { fetchPipedAudioStream(node.apiBaseUrl, videoId) }.getOrNull()
+            if (relay != null && probeStreamUrl(relay)) {
+                streamCache[videoId] = relay
+                return@withContext Result.success(relay)
+            }
+        }
+
+        Result.failure(IllegalStateException("No playable stream for $videoId (${diagnostics.take(4).joinToString(", ")})"))
     }
 
     private suspend fun fetchPipedAudioStream(baseUrl: String, videoId: String): ResolvedStream? {
         val respText = http.get("$baseUrl/streams/$videoId") {
-            header("User-Agent", "CroixPlayerPrime/2.5 (Android 12+)")
+            header("User-Agent", "CroixPlayerPrime/2.6 (Android 12+)")
             header("Accept", "application/json")
         }.bodyAsText()
         val root = json.parseToJsonElement(respText).jsonObject
@@ -579,71 +711,217 @@ class InnerTubeClient(
             }
             .maxByOrNull { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 }
             ?: return null
+        val streamUrl = best["url"]!!.jsonPrimitive.content
+        val hdrs = YtPlaybackClient.resolveHeadersForStreamUrl(streamUrl)
         return ResolvedStream(
-            url = best["url"]!!.jsonPrimitive.content,
+            url = streamUrl,
             mimeType = best["mimeType"]?.jsonPrimitive?.contentOrNull ?: "audio/mp4",
             bitrate = best["bitrate"]?.jsonPrimitive?.intOrNull ?: 128_000,
+            clientKey = "PIPED_RELAY",
+            userAgent = hdrs.userAgent,
+            origin = hdrs.origin,
+            referer = hdrs.referer,
         )
     }
 
-    private suspend fun fetchDirectPlayerStream(
+    private suspend fun fetchPlayerStreamWithClient(
         videoId: String,
-        clientName: String,
-        clientVersion: String,
+        client: YtPlaybackClient,
+        visitorData: String?,
+        signatureTimestamp: Int?,
+        useLogin: Boolean,
     ): ResolvedStream? {
         val payload = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
-                    put("clientName", clientName)
-                    put("clientVersion", clientVersion)
+                    put("clientName", client.clientName)
+                    put("clientVersion", client.clientVersion)
                     put("hl", localeHl)
                     put("gl", localeGl)
-                    if (clientName == "ANDROID_VR") {
-                        put("androidSdkVersion", 32)
-                        put("deviceMake", "Oculus")
-                        put("deviceModel", "Quest 3")
-                    } else if (clientName == "IOS") {
-                        put("deviceMake", "Apple")
-                        put("deviceModel", "iPhone16,2")
+                    client.osName?.let { put("osName", it) }
+                    client.osVersion?.let { put("osVersion", it) }
+                    client.deviceMake?.let { put("deviceMake", it) }
+                    client.deviceModel?.let { put("deviceModel", it) }
+                    client.androidSdkVersion?.let { put("androidSdkVersion", it) }
+                    visitorData?.takeIf { it.isNotBlank() }?.let { put("visitorData", it) }
+                }
+                if (client.isEmbedded) {
+                    putJsonObject("thirdParty") {
+                        put("embedUrl", "https://www.youtube.com/watch?v=$videoId")
                     }
                 }
             }
             put("videoId", videoId)
             put("contentCheckOk", true)
             put("racyCheckOk", true)
+            if (signatureTimestamp != null && client.useSignatureTimestamp) {
+                putJsonObject("playbackContext") {
+                    putJsonObject("contentPlaybackContext") {
+                        put("signatureTimestamp", signatureTimestamp)
+                    }
+                }
+            }
         }
 
-        val responseText = http.post("https://youtubei.googleapis.com/youtubei/v1/player?prettyPrint=false") {
+        val cfg = serverConfig
+        val authHeader = if (useLogin && cfg.hasYtMusicAccount) {
+            SapisidAuthSigner.buildAuthHeader(cfg.ytMusicCookie, origin = client.origin)
+        } else {
+            null
+        }
+
+        val responseText = http.post(client.playerEndpointUrl()) {
             contentType(ContentType.Application.Json)
-            header("User-Agent", "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip")
+            header("X-Goog-Api-Format-Version", "1")
+            header("X-YouTube-Client-Name", client.clientId)
+            header("X-YouTube-Client-Version", client.clientVersion)
+            header("X-Origin", client.origin)
+            header("Origin", client.origin)
+            header("Referer", client.referer)
+            header("User-Agent", client.userAgent)
+            visitorData?.takeIf { it.isNotBlank() }?.let { header("X-Goog-Visitor-Id", it) }
+            if (authHeader != null) {
+                header("Authorization", authHeader)
+                header("Cookie", cfg.ytMusicCookie)
+            }
             setBody(payload.toString())
         }.bodyAsText()
 
         val root = json.parseToJsonElement(responseText).jsonObject
-        if (serverConfig.strictAdBlockEnabled) {
+        if (cfg.strictAdBlockEnabled) {
             AdBlockEngine.countAndStripPlayerAds(root)
         }
-        val streamingData = root["streamingData"]?.jsonObject ?: return null
-        val adaptive = streamingData["adaptiveFormats"]?.jsonArray ?: return null
 
-        val bestAudio = adaptive
+        // Capture visitorData from responseContext if we didn't have one yet
+        if (cachedVisitorData.isNullOrBlank()) {
+            root["responseContext"]?.jsonObject?.get("visitorData")?.jsonPrimitive?.contentOrNull?.let {
+                if (it.isNotBlank()) cachedVisitorData = it
+            }
+        }
+
+        val playabilityStatus = root["playabilityStatus"]?.jsonObject
+            ?.get("status")?.jsonPrimitive?.contentOrNull
+        if (playabilityStatus != "OK") return null
+
+        val streamingData = root["streamingData"]?.jsonObject ?: return null
+        val expiresSec = streamingData["expiresInSeconds"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 14_400L
+        val adaptive = streamingData["adaptiveFormats"]?.jsonArray.orEmpty()
+        val formats = streamingData["formats"]?.jsonArray.orEmpty()
+
+        // Prefer adaptive audio-only formats (highest bitrate audio/mp4 or audio/webm),
+        // fall back to muxed progressive formats if adaptive audio is unavailable.
+        val audioCandidates = adaptive
             .mapNotNull { it as? JsonObject }
             .filter { fmt ->
                 val mime = fmt["mimeType"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                val directUrl = fmt["url"]?.jsonPrimitive?.contentOrNull
-                mime.startsWith("audio/") &&
-                    !directUrl.isNullOrBlank() &&
-                    (!serverConfig.strictAdBlockEnabled || !AdBlockEngine.isAdTrackingStreamUrl(directUrl))
+                mime.startsWith("audio/")
             }
-            .maxByOrNull { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 }
-            ?: return null
+            .sortedWith(
+                compareByDescending<JsonObject> { fmt ->
+                    // Prefer standard mp4a/opus non-DRC streams
+                    val mime = fmt["mimeType"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    if ("mp4a" in mime || "opus" in mime) 1 else 0
+                }.thenByDescending { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 },
+            ) + formats.mapNotNull { it as? JsonObject }.sortedByDescending { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 }
 
-        return ResolvedStream(
-            url = bestAudio["url"]!!.jsonPrimitive.content,
-            mimeType = bestAudio["mimeType"]?.jsonPrimitive?.contentOrNull ?: "audio/mp4",
-            bitrate = bestAudio["bitrate"]?.jsonPrimitive?.intOrNull ?: 128_000,
-        )
+        for (fmt in audioCandidates.take(6)) {
+            val rawUrl = resolveFormatUrl(fmt, videoId, client) ?: continue
+            if (cfg.strictAdBlockEnabled && AdBlockEngine.isAdTrackingStreamUrl(rawUrl)) continue
+            val patchedUrl = YtPlaybackClient.patchClientVersion(rawUrl, client.clientVersion)
+            val mime = fmt["mimeType"]?.jsonPrimitive?.contentOrNull ?: "audio/mp4"
+            val bitrate = fmt["bitrate"]?.jsonPrimitive?.intOrNull ?: 128_000
+            return ResolvedStream(
+                url = patchedUrl,
+                mimeType = mime,
+                bitrate = bitrate,
+                clientKey = client.key,
+                userAgent = client.userAgent,
+                origin = if (client.isWebLike) client.origin else null,
+                referer = if (client.isWebLike) client.referer else null,
+                expiresAtEpochMs = System.currentTimeMillis() + (expiresSec * 1000L).coerceAtLeast(600_000L),
+            )
+        }
+        return null
     }
+
+    private fun resolveFormatUrl(fmt: JsonObject, videoId: String, client: YtPlaybackClient): String? {
+        val directUrl = fmt["url"]?.jsonPrimitive?.contentOrNull
+        if (!directUrl.isNullOrBlank()) {
+            return deobfuscateThrottlingParam(videoId, directUrl)
+        }
+        val cipher = fmt["signatureCipher"]?.jsonPrimitive?.contentOrNull
+            ?: fmt["cipher"]?.jsonPrimitive?.contentOrNull
+            ?: return null
+        val params = cipher.split("&").mapNotNull { part ->
+            val eq = part.indexOf('=')
+            if (eq <= 0) null
+            else URLDecoder.decode(part.substring(0, eq), "UTF-8") to URLDecoder.decode(part.substring(eq + 1), "UTF-8")
+        }.toMap()
+        val baseUrl = params["url"] ?: return null
+        val obfuscatedSig = params["s"] ?: return null
+        val sp = params["sp"]?.takeIf { it.isNotBlank() } ?: "signature"
+
+        val decipheredSig = runCatching {
+            YoutubeJavaScriptPlayerManager.deobfuscateSignature(videoId, obfuscatedSig)
+        }.recoverCatching {
+            YoutubeJavaScriptPlayerManager.clearAllCaches()
+            YoutubeJavaScriptPlayerManager.deobfuscateSignature(videoId, obfuscatedSig)
+        }.getOrNull() ?: return null
+
+        val sep = if (baseUrl.contains("?")) "&" else "?"
+        val signedUrl = "$baseUrl$sep$sp=${URLEncoder.encode(decipheredSig, "UTF-8")}"
+        return deobfuscateThrottlingParam(videoId, signedUrl)
+    }
+
+    private fun deobfuscateThrottlingParam(videoId: String, url: String): String {
+        if (!url.contains("n=")) return url
+        return runCatching {
+            YoutubeJavaScriptPlayerManager.getUrlWithThrottlingParameterDeobfuscated(videoId, url)
+        }.recoverCatching {
+            YoutubeJavaScriptPlayerManager.clearAllCaches()
+            YoutubeJavaScriptPlayerManager.getUrlWithThrottlingParameterDeobfuscated(videoId, url)
+        }.getOrElse { url }
+    }
+
+    private fun fetchSignatureTimestampOrNull(videoId: String): Int? =
+        runCatching {
+            YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId)
+        }.recoverCatching {
+            YoutubeJavaScriptPlayerManager.clearAllCaches()
+            YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId)
+        }.getOrNull()
+
+    /**
+     * Probing stream URLs with `Range: bytes=0-1` + exact client headers (Metrolist / ArchiveTune pattern)
+     * catches HTTP 403 / HTML error pages immediately so we cleanly fall back to the next working client.
+     */
+    private fun probeStreamUrl(stream: ResolvedStream): Boolean = runCatching {
+        val reqBuilder = Request.Builder()
+            .url(stream.url)
+            .get()
+            .header("Range", "bytes=0-1")
+            .header("User-Agent", stream.userAgent)
+        stream.origin?.let { reqBuilder.header("Origin", it) }
+        stream.referer?.let { reqBuilder.header("Referer", it) }
+
+        val probeClient = okHttp.newBuilder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .callTimeout(7, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
+
+        probeClient.newCall(reqBuilder.build()).execute().use { resp ->
+            val code = resp.code
+            if (code == 403 || code !in 200..399) return@use false
+            val ct = resp.header("Content-Type").orEmpty().lowercase(Locale.US)
+            if (ct.startsWith("text/html") || ct.startsWith("text/plain") || ct.startsWith("application/json")) {
+                return@use false
+            }
+            resp.body?.source()?.request(1) == true
+        }
+    }.getOrDefault(false)
 
     private suspend fun postInnerTube(endpoint: String, body: JsonObject): String {
         val cfg = serverConfig

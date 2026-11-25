@@ -71,6 +71,13 @@ jobs:
           fi
           cp "$APK_PATH" CroixPlayerPrime-arm64-v8a-signed.apk
 
+      - name: Upload Direct APK Artifact (Backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CroixPlayerPrime-arm64-v8a-signed
+          path: CroixPlayerPrime-arm64-v8a-signed.apk
+          retention-days: 30
+
       - name: Publish Direct Signed APK to GitHub Release (No ZIP)
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
@@ -79,9 +86,10 @@ jobs:
           TAG="latest-prime"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" CroixPlayerPrime-arm64-v8a-signed.apk --clobber
-            gh release edit "$TAG" --title "Croix Player Prime (Latest ARM64 APK)" --notes "Direct signed ARM64 (ARMv8/ARMv9) Android 12+ APK built from commit ${GITHUB_SHA::7}."
+            gh release edit "$TAG" --title "Croix Player Prime (Latest ARM64 APK)" --notes "Direct signed ARM64 (ARMv8/ARMv9) Android 12+ APK built from commit ${GITHUB_SHA::7}." --latest
           else
             gh release create "$TAG" CroixPlayerPrime-arm64-v8a-signed.apk \
               --title "Croix Player Prime (Latest ARM64 APK)" \
-              --notes "Direct signed ARM64 (ARMv8/ARMv9) Android 12+ APK built from commit ${GITHUB_SHA::7}."
+              --notes "Direct signed ARM64 (ARMv8/ARMv9) Android 12+ APK built from commit ${GITHUB_SHA::7}." \
+              --latest
           fi

@@ -385,6 +385,24 @@ fun NowPlayingOverlay(
                 }
             }
 
+            if (playback.errorMessage != null) {
+                CroixGlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    accentTint = Color(0xFFFF5252),
+                    cornerRadius = 14.dp,
+                    onClick = onTogglePlay,
+                ) {
+                    Text(
+                        text = "⚠ ${playback.errorMessage}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
+            }
+
             // Center Dynamic Panel (smooth fade + subtle scale transitions between Player / Lyrics / Queue / Audio)
             Box(
                 modifier = Modifier

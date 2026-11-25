@@ -48,10 +48,12 @@ class CroixDownloadManager(
         _activeProgress.update { it + (track.id to 0.02f) }
         val result = runCatching {
             val stream = innerTube.resolveAudioStream(track.id).getOrThrow()
-            val req = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url(stream.url)
-                .header("User-Agent", "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L) gzip")
-                .build()
+                .header("User-Agent", stream.userAgent)
+            stream.origin?.let { reqBuilder.header("Origin", it) }
+            stream.referer?.let { reqBuilder.header("Referer", it) }
+            val req = reqBuilder.build()
 
             val targetFile = File(downloadsDir, "${track.id}.m4a")
             val tempFile = File(downloadsDir, "${track.id}.part")

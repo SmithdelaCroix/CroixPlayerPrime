@@ -14,7 +14,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.croix.prime.engine.StreamRequestHeaders
+import com.croix.prime.engine.YtPlaybackClient
 import okhttp3.OkHttpClient
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 class CroixPlaybackService : MediaSessionService() {
@@ -24,12 +27,38 @@ class CroixPlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
+        // Dynamic Metrolist-style OkHttp interceptor: matches exact User-Agent, Origin & Referer
+        // for EVERY YouTube CDN stream URL (?c=...&cver=...) so googlevideo.com never rejects with 403!
         val okHttp = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(25, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .addInterceptor { chain ->
+                val orig = chain.request()
+                val urlStr = orig.url.toString()
+                val isYouTubeMedia = "googlevideo.com" in urlStr || "youtube.com" in urlStr
+                if (!isYouTubeMedia) {
+                    return@addInterceptor chain.proceed(orig)
+                }
+                val headers = CroixAudioSessionBridge.resolveHeadersForUrl(urlStr)
+                val updated = orig.newBuilder()
+                    .header("User-Agent", headers.userAgent)
+                if (headers.origin != null) {
+                    updated.header("Origin", headers.origin!!)
+                } else {
+                    updated.removeHeader("Origin")
+                }
+                if (headers.referer != null) {
+                    updated.header("Referer", headers.referer!!)
+                } else {
+                    updated.removeHeader("Referer")
+                }
+                chain.proceed(updated.build())
+            }
             .build()
         val dataSourceFactory = OkHttpDataSource.Factory(okHttp)
-            .setUserAgent("com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L) gzip")
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -75,4 +104,14 @@ object CroixAudioSessionBridge {
 
     @Volatile
     var exoPlayerRef: ExoPlayer? = null
+
+    private val streamHeadersByUrl = ConcurrentHashMap<String, StreamRequestHeaders>()
+
+    fun registerStreamHeaders(url: String, headers: StreamRequestHeaders) {
+        if (streamHeadersByUrl.size > 48) streamHeadersByUrl.clear()
+        streamHeadersByUrl[url] = headers
+    }
+
+    fun resolveHeadersForUrl(url: String): StreamRequestHeaders =
+        streamHeadersByUrl[url] ?: YtPlaybackClient.resolveHeadersForStreamUrl(url)
 }

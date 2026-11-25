@@ -1,9 +1,15 @@
--keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,Exceptions
 -keep class com.croix.prime.** { *; }
 -keep class com.croix.player.prime.** { *; }
 -keep class org.schabi.newpipe.** { *; }
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.classfile.** { *; }
+-keep class androidx.media3.** { *; }
+-keep class io.ktor.** { *; }
+-keep class kotlinx.serialization.** { *; }
 -dontwarn org.schabi.newpipe.**
 -dontwarn org.mozilla.**
 -dontwarn io.ktor.**
 -dontwarn okhttp3.**
 -dontwarn okio.**
+-dontwarn java.lang.invoke.**

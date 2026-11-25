@@ -18,3 +18,10 @@ dependencies {
 
     testImplementation(libs.junit)
 }
+
+tasks.withType<Test> {
+    systemProperty("runLiveStreamProbe", System.getProperty("runLiveStreamProbe") ?: "false")
+    testLogging {
+        showStandardStreams = true
+    }
+}

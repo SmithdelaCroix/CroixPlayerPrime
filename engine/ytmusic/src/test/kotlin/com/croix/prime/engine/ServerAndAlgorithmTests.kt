@@ -71,4 +71,28 @@ class ServerAndAlgorithmTests {
         val heavySpotify = engine.interleaveByWeight(spotifyTracks, ytTracks, primaryWeight = 0.9f, limit = 8)
         assertTrue(heavySpotify.count { it.id.startsWith("sp_") } >= 5)
     }
+
+    @Test
+    fun `youtube playback client resolves matching headers and patches cver`() {
+        val visionHeaders = YtPlaybackClient.resolveHeadersForStreamUrl(
+            "https://rr1---sn.googlevideo.com/videoplayback?c=VISIONOS&cver=0.1&mime=audio%2Fmp4",
+        )
+        assertEquals(YtPlaybackClient.VISIONOS.userAgent, visionHeaders.userAgent)
+
+        val iosHeaders = YtPlaybackClient.resolveHeadersForStreamUrl(
+            "https://rr1---sn.googlevideo.com/videoplayback?c=IOS&cver=19.29.1",
+        )
+        assertEquals(YtPlaybackClient.IOS.userAgent, iosHeaders.userAgent)
+
+        val webHeaders = YtPlaybackClient.resolveHeadersForStreamUrl(
+            "https://rr1---sn.googlevideo.com/videoplayback?c=WEB_REMIX&cver=1.20260213.01.00",
+        )
+        assertEquals(YtPlaybackClient.ORIGIN_YOUTUBE_MUSIC, webHeaders.origin)
+
+        val patched = YtPlaybackClient.patchClientVersion(
+            "https://rr1---sn.googlevideo.com/videoplayback?c=ANDROID_VR&cver=1.00&id=1",
+            "1.37",
+        )
+        assertTrue(patched.contains("cver=1.37"))
+    }
 }

@@ -103,5 +103,9 @@ data class ResolvedStream(
     val url: String,
     val mimeType: String,
     val bitrate: Int,
+    val clientKey: String = "",
+    val userAgent: String = YtPlaybackClient.ANDROID_VR_NO_AUTH.userAgent,
+    val origin: String? = null,
+    val referer: String? = null,
     val expiresAtEpochMs: Long = System.currentTimeMillis() + 4 * 60 * 60 * 1000L,
 )

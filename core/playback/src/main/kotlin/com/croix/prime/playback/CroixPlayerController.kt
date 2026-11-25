@@ -14,17 +14,21 @@ import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.croix.prime.engine.InnerTubeClient
+import com.croix.prime.engine.ResolvedStream
 import com.croix.prime.engine.SponsorBlockClient
 import com.croix.prime.engine.SponsorBlockSkipper
 import com.croix.prime.engine.SponsorCategory
 import com.croix.prime.engine.SponsorSegment
+import com.croix.prime.engine.StreamRequestHeaders
 import com.croix.prime.engine.Track
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -90,9 +94,12 @@ class CroixPlayerController(
     val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
 
     private var controller: MediaController? = null
+    private val controllerReady = CompletableDeferred<MediaController>()
     private var playJob: Job? = null
     private var sleepJob: Job? = null
     private var crossfadeTriggeredForTrackId: String? = null
+    private var activeClientKey: String = ""
+    private var currentTrackRetryCount: Int = 0
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
     private var loudness: LoudnessEnhancer? = null
@@ -107,7 +114,10 @@ class CroixPlayerController(
                     val mc = future.get()
                     controller = mc
                     mc.addListener(playerListener)
+                    if (!controllerReady.isCompleted) controllerReady.complete(mc)
                     startPositionTicker()
+                }.onFailure { err ->
+                    if (!controllerReady.isCompleted) controllerReady.completeExceptionally(err)
                 }
             },
             ContextCompat.getMainExecutor(appContext),
@@ -116,17 +126,47 @@ class CroixPlayerController(
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            _state.update { it.copy(isPlaying = isPlaying) }
+            _state.update {
+                if (isPlaying) it.copy(isPlaying = true, isBuffering = false, errorMessage = null)
+                else it.copy(isPlaying = false)
+            }
+            if (isPlaying) currentTrackRetryCount = 0
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             _state.update { it.copy(isBuffering = playbackState == Player.STATE_BUFFERING) }
+            if (playbackState == Player.STATE_READY) {
+                currentTrackRetryCount = 0
+                _state.update { it.copy(errorMessage = null) }
+            }
             if (playbackState == Player.STATE_ENDED) {
                 if (_state.value.repeatOne) {
                     seekTo(0L)
                     controller?.play()
                 } else {
                     skipNext()
+                }
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            val failedTrack = _state.value.currentTrack
+            if (failedTrack != null && !_state.value.isPlayingOfflineFile && currentTrackRetryCount < 2) {
+                currentTrackRetryCount++
+                if (activeClientKey.isNotBlank()) {
+                    innerTube.markStreamClientFailed(failedTrack.id, activeClientKey)
+                } else {
+                    innerTube.invalidateStreamCache(failedTrack.id)
+                }
+                _state.update { it.copy(isBuffering = true, errorMessage = null) }
+                startPlayingInternal(failedTrack, bypassCache = true)
+            } else {
+                _state.update {
+                    it.copy(
+                        isPlaying = false,
+                        isBuffering = false,
+                        errorMessage = error.errorCodeName + (error.cause?.message?.let { m -> ": $m" } ?: ""),
+                    )
                 }
             }
         }
@@ -267,10 +307,19 @@ class CroixPlayerController(
         startPlayingInternal(track)
     }
 
+    fun retryCurrentTrack() {
+        val track = _state.value.currentTrack ?: return
+        currentTrackRetryCount = 0
+        innerTube.invalidateStreamCache(track.id)
+        _state.update { it.copy(isBuffering = true, errorMessage = null) }
+        startPlayingInternal(track, bypassCache = true)
+    }
+
     @OptIn(UnstableApi::class)
-    private fun startPlayingInternal(track: Track) {
+    private fun startPlayingInternal(track: Track, bypassCache: Boolean = false) {
         playJob?.cancel()
         skippedUuids.clear()
+        if (!bypassCache) currentTrackRetryCount = 0
         playJob = scope.launch {
             launch {
                 val enabled = enabledCategoriesProvider()
@@ -282,16 +331,35 @@ class CroixPlayerController(
             }
 
             val offlineFile = localFileProvider(track.id)
-            val uriToPlay: Result<Uri> = if (offlineFile != null) {
+            val resolvedResult: Result<Pair<Uri, ResolvedStream?>> = if (offlineFile != null) {
                 _state.update { it.copy(isPlayingOfflineFile = true) }
-                Result.success(Uri.fromFile(offlineFile))
+                activeClientKey = "OFFLINE"
+                Result.success(Uri.fromFile(offlineFile) to null)
             } else {
                 _state.update { it.copy(isPlayingOfflineFile = false) }
-                innerTube.resolveAudioStream(track.id).map { Uri.parse(it.url) }
+                innerTube.resolveAudioStream(track.id, bypassCache = bypassCache).map { stream ->
+                    activeClientKey = stream.clientKey
+                    CroixAudioSessionBridge.registerStreamHeaders(
+                        stream.url,
+                        StreamRequestHeaders(
+                            userAgent = stream.userAgent,
+                            origin = stream.origin,
+                            referer = stream.referer,
+                            clientKey = stream.clientKey,
+                        ),
+                    )
+                    Uri.parse(stream.url) to stream
+                }
             }
 
-            uriToPlay.onSuccess { mediaUri ->
-                val mc = controller ?: return@onSuccess
+            resolvedResult.onSuccess { (mediaUri, _) ->
+                val mc = controller ?: runCatching { controllerReady.await() }.getOrNull()
+                if (mc == null) {
+                    _state.update {
+                        it.copy(isBuffering = false, errorMessage = "Audio service unavailable")
+                    }
+                    return@onSuccess
+                }
                 val metadata = MediaMetadata.Builder()
                     .setTitle(track.title)
                     .setArtist(track.artist)
@@ -328,8 +396,9 @@ class CroixPlayerController(
             }.onFailure { err ->
                 _state.update {
                     it.copy(
+                        isPlaying = false,
                         isBuffering = false,
-                        errorMessage = "Could not play track: ${err.message ?: "Network error"}",
+                        errorMessage = err.message ?: "Could not resolve audio stream",
                     )
                 }
             }
@@ -337,7 +406,16 @@ class CroixPlayerController(
     }
 
     fun togglePlayPause() {
+        val cur = _state.value
+        if (cur.errorMessage != null && cur.currentTrack != null) {
+            retryCurrentTrack()
+            return
+        }
         val mc = controller ?: return
+        if (mc.playbackState == Player.STATE_IDLE && cur.currentTrack != null) {
+            retryCurrentTrack()
+            return
+        }
         if (mc.isPlaying) mc.pause() else mc.play()
     }
 

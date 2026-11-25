@@ -326,8 +326,8 @@ fun SettingsAndStudioOverlay(
                             ) {
                                 Icon(Icons.Rounded.Info, null, tint = palette.textSecondary)
                                 Column {
-                                    Text("Croix Player Prime v2.5.0", color = Color.White, fontWeight = FontWeight.Bold)
-                                    Text("120fps Glass Engine • Ad-Block Server • Spotify Blend", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                    Text("Croix Player Prime v2.6.0", color = Color.White, fontWeight = FontWeight.Bold)
+                                    Text("Metrolist-grade YT Engine • Spotify Sync • 120fps", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }

@@ -108,12 +108,18 @@ class SpotifyTasteClient {
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 
-        private val HASHES = mapOf(
-            "profileAttributes" to "53bcb064f6cd18c23f752bc324a791194d20df612d8e1239c735144ab0399ced",
-            "libraryV3" to "973e511ca44261fda7eebac8b653155e7caee3675abb4fb110cc1b8c78b091c3",
-            "fetchPlaylist" to "346811f856fb0b7e4f6c59f8ebea78dd081c6e2fb01b77c954b26259d5fc6763",
-            "fetchLibraryTracks" to "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240",
+        private val HASHES = java.util.concurrent.ConcurrentHashMap(
+            mapOf(
+                "profileAttributes" to "53bcb064f6cd18c23f752bc324a791194d20df612d8e1239c735144ab0399ced",
+                "libraryV3" to "973e511ca44261fda7eebac8b653155e7caee3675abb4fb110cc1b8c78b091c3",
+                "fetchPlaylist" to "346811f856fb0b7e4f6c59f8ebea78dd081c6e2fb01b77c954b26259d5fc6763",
+                "fetchLibraryTracks" to "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240",
+                "home" to "23e37f2e58d82d567f27080101d36609009d8c3676457b1086cb0acc55b72a5d",
+                "queryWhatsNewFeed" to "3b53dede3c6054e8b7c962dd280eb6761c5d1c82b06b039f4110d76a62b4966b",
+            ),
         )
+        private val BUNDLE_URL_REGEX = Regex("""https://open\.spotifycdn\.com/cdn/build/web-player/[^"']+?\.js""")
+        private val OPERATION_HASH_REGEX = Regex("""new [\w$]+(?:\.[\w$]+)?\("(\w+)","(?:query|mutation|subscription)","([0-9a-f]{64})"""")
     }
 
     @Serializable
@@ -429,6 +435,7 @@ class SpotifyTasteClient {
         token: String,
         operationName: String,
         variables: JsonObject = buildJsonObject {},
+        allowHashDiscovery: Boolean = true,
     ): JsonObject {
         val hash = HASHES[operationName] ?: error("Unknown Spotify GQL op $operationName")
         val payload = buildJsonObject {
@@ -449,9 +456,44 @@ class SpotifyTasteClient {
             header("Referer", "https://open.spotify.com/")
             setBody(TextContent(payload.toString(), ContentType.Application.Json.withParameter("charset", "UTF-8")))
         }
+        val body = resp.bodyAsText()
         if (resp.status.value !in 200..299) error("Spotify GQL HTTP ${resp.status.value}")
-        return json.parseToJsonElement(resp.bodyAsText()).jsonObject
+        val root = json.parseToJsonElement(body).jsonObject
+        val errMsg = root.arr("errors")?.firstOrNull()?.jsonObject?.str("message").orEmpty()
+        if (allowHashDiscovery && errMsg.contains("PersistedQueryNotFound", ignoreCase = true)) {
+            if (discoverLiveHashes()) {
+                return graphqlPost(token, operationName, variables, allowHashDiscovery = false)
+            }
+        }
+        return root
     }
+
+    /**
+     * Yuma-style automatic Spotify web-player bundle hash discovery:
+     * if Spotify rotates a GQL persisted-query hash, discovers fresh hashes directly from open.spotify.com JS bundles.
+     */
+    private suspend fun discoverLiveHashes(): Boolean = runCatching {
+        val html = http.get("https://open.spotify.com/") {
+            header("User-Agent", USER_AGENT)
+        }.bodyAsText()
+        val bundles = BUNDLE_URL_REGEX.findAll(html).map { it.value }.distinct().take(12).toList()
+        var updated = 0
+        for (url in bundles) {
+            val js = runCatching {
+                http.get(url) { header("User-Agent", USER_AGENT) }.bodyAsText()
+            }.getOrNull() ?: continue
+            OPERATION_HASH_REGEX.findAll(js).forEach { m ->
+                val op = m.groupValues[1]
+                val h = m.groupValues[2]
+                if (HASHES.containsKey(op) && HASHES[op] != h) {
+                    HASHES[op] = h
+                    updated++
+                }
+            }
+            if (updated >= 3) break
+        }
+        updated > 0
+    }.getOrDefault(false)
 
     private fun parseRestTrack(obj: JsonObject): SpotifySeedTrack? {
         val id = obj.str("id").orEmpty()

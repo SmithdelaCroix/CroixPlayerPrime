@@ -1,0 +1,9 @@
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-keep class com.croix.prime.** { *; }
+-keep class com.croix.player.prime.** { *; }
+-keep class org.schabi.newpipe.** { *; }
+-dontwarn org.schabi.newpipe.**
+-dontwarn org.mozilla.**
+-dontwarn io.ktor.**
+-dontwarn okhttp3.**
+-dontwarn okio.**

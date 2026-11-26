@@ -54,6 +54,7 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Hub
@@ -156,6 +157,7 @@ import com.croix.prime.engine.SavedYtMusicAccount
 import com.croix.prime.engine.ServerConnectionConfig
 import com.croix.prime.engine.ServerHealthStatus
 import com.croix.prime.engine.ServerPresets
+import com.croix.prime.engine.SpotifyHomeMixSummary
 import com.croix.prime.engine.SpotifyPlaylistSummary
 import com.croix.prime.engine.YtMusicAccountProfile
 import com.croix.prime.engine.YtMusicPlaylistSummary
@@ -238,6 +240,7 @@ fun SettingsAndStudioOverlay(
     onPingServer: () -> Unit,
     onOpenYtMusicLogin: () -> Unit,
     onOpenAddYtMusicAccount: () -> Unit,
+    onOpenSwitchYtChannelWebView: () -> Unit,
     onSyncYtMusicNow: () -> Unit,
     onRefreshYtMusicProfiles: () -> Unit,
     onSwitchYtMusicProfile: (YtMusicAccountProfile) -> Unit,
@@ -252,6 +255,9 @@ fun SettingsAndStudioOverlay(
     onApplyAlgorithmBlend: () -> Unit,
     onDisconnectSpotify: () -> Unit,
     onImportSpotifyPlaylist: (SpotifyPlaylistSummary) -> Unit,
+    onPlaySpotifyPlaylist: (SpotifyPlaylistSummary) -> Unit,
+    onPlaySpotifyHomeMix: (SpotifyHomeMixSummary) -> Unit,
+    onSyncSpotifyLikesToFavs: () -> Unit,
     onCheckUpdates: () -> Unit,
 ) {
     val design = LocalCroixDesign.current
@@ -958,6 +964,14 @@ fun SettingsAndStudioOverlay(
                                                     }
                                                 }
                                             }
+                                            OutlinedButton(
+                                                onClick = onOpenSwitchYtChannelWebView,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                Icon(Icons.Rounded.SwapHoriz, null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(if (es) "Cambiar canal en YouTube Music" else "Switch Channel in YouTube Music")
+                                            }
                                         }
                                     }
                                 }
@@ -996,7 +1010,10 @@ fun SettingsAndStudioOverlay(
                                             )
                                         } else {
                                             serverState.savedYtAccounts.forEach { acc ->
-                                                val isActive = serverState.isYtMusicConnected && acc.cookie == cfg.ytMusicCookie
+                                                val isActive = serverState.isYtMusicConnected &&
+                                                    acc.cookie == cfg.ytMusicCookie &&
+                                                    acc.pageId == cfg.ytMusicPageId &&
+                                                    acc.name.equals(cfg.ytMusicAccountName, ignoreCase = true)
                                                 CroixGlassCard(
                                                     modifier = Modifier.fillMaxWidth(),
                                                     cornerRadius = 14.dp,
@@ -1276,14 +1293,28 @@ fun SettingsAndStudioOverlay(
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                 ) {
-                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                        Icon(Icons.Rounded.CheckCircle, null, tint = Color(0xFF1DB954))
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                        modifier = Modifier.weight(1f),
+                                                    ) {
+                                                        if (taste.avatarUrl.isNotBlank()) {
+                                                            AsyncImage(
+                                                                model = taste.avatarUrl,
+                                                                contentDescription = taste.accountName,
+                                                                contentScale = ContentScale.Crop,
+                                                                modifier = Modifier.size(42.dp).clip(CircleShape),
+                                                            )
+                                                        } else {
+                                                            Icon(Icons.Rounded.CheckCircle, null, tint = Color(0xFF1DB954))
+                                                        }
                                                         Column {
-                                                            Text(taste.accountName, color = Color.White, fontWeight = FontWeight.Bold)
+                                                            Text(taste.accountName, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                             Text(
-                                                                "${taste.topArtists.size} artistas • ${taste.allSeedTracks.size} temas • ${taste.playlists.size} playlists",
+                                                                "${taste.topArtists.size} artistas • ${taste.relatedArtists.size} similares • ${taste.likedTracks.size} Me gusta • ${taste.homeMixes.size} Mixes",
                                                                 color = palette.textSecondary,
                                                                 style = MaterialTheme.typography.bodySmall,
+                                                                maxLines = 2,
                                                             )
                                                         }
                                                     }
@@ -1310,25 +1341,103 @@ fun SettingsAndStudioOverlay(
                                                 }
                                             }
 
-                                            if (taste.playlists.isNotEmpty()) {
+                                            if (taste.likedTracks.isNotEmpty()) {
+                                                OutlinedButton(
+                                                    onClick = onSyncSpotifyLikesToFavs,
+                                                    enabled = !spotifySyncing,
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                ) {
+                                                    Icon(Icons.Rounded.Favorite, null, tint = Color(0xFF1DB954), modifier = Modifier.size(16.dp))
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(
+                                                        if (es) "Importar Me gusta de Spotify a Favoritos (${taste.likedTracks.size})"
+                                                        else "Sync Spotify Liked Songs to Favorites (${taste.likedTracks.size})",
+                                                    )
+                                                }
+                                            }
+
+                                            if (taste.homeMixes.isNotEmpty()) {
                                                 Spacer(Modifier.height(4.dp))
-                                                Text(strings.importSpotifyPlaylists, color = Color(0xFF1DB954), fontWeight = FontWeight.Bold)
-                                                taste.playlists.take(15).forEach { pl ->
+                                                Text(
+                                                    if (es) "Tus Mixes de Spotify (Daily Mix, Discover, Daylist)" else "Your Spotify Mixes",
+                                                    color = Color(0xFF1DB954),
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                                taste.homeMixes.take(10).forEach { mix ->
                                                     CroixGlassCard(
                                                         modifier = Modifier.fillMaxWidth(),
                                                         cornerRadius = 12.dp,
-                                                        onClick = { if (!spotifySyncing) onImportSpotifyPlaylist(pl) },
+                                                        onClick = { if (!spotifySyncing) onPlaySpotifyHomeMix(mix) },
                                                     ) {
                                                         Row(
-                                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
                                                             verticalAlignment = Alignment.CenterVertically,
-                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                                                         ) {
+                                                            if (mix.thumbnailUrl.isNotBlank()) {
+                                                                AsyncImage(
+                                                                    model = mix.thumbnailUrl,
+                                                                    contentDescription = mix.name,
+                                                                    contentScale = ContentScale.Crop,
+                                                                    modifier = Modifier.size(42.dp).clip(RoundedCornerShape(8.dp)),
+                                                                )
+                                                            }
+                                                            Column(modifier = Modifier.weight(1f)) {
+                                                                Text(mix.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                                if (mix.description.isNotBlank()) {
+                                                                    Text(mix.description, color = palette.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                                }
+                                                            }
+                                                            Icon(Icons.Rounded.PlayArrow, contentDescription = "Reproducir", tint = Color(0xFF1DB954))
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (taste.playlists.isNotEmpty()) {
+                                                Spacer(Modifier.height(4.dp))
+                                                Text(
+                                                    if (es) "Tus Playlists de Spotify (Reproducir o Importar)" else strings.importSpotifyPlaylists,
+                                                    color = Color(0xFF1DB954),
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                                taste.playlists.take(25).forEach { pl ->
+                                                    CroixGlassCard(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        cornerRadius = 12.dp,
+                                                        onClick = { if (!spotifySyncing) onPlaySpotifyPlaylist(pl) },
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                        ) {
+                                                            if (pl.thumbnailUrl.isNotBlank()) {
+                                                                AsyncImage(
+                                                                    model = pl.thumbnailUrl,
+                                                                    contentDescription = pl.name,
+                                                                    contentScale = ContentScale.Crop,
+                                                                    modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)),
+                                                                )
+                                                            }
                                                             Column(modifier = Modifier.weight(1f)) {
                                                                 Text(pl.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                                 Text("${pl.trackCount} canciones", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
                                                             }
-                                                            Icon(Icons.Rounded.Download, null, tint = Color(0xFF1DB954))
+                                                            IconButton(
+                                                                enabled = !spotifySyncing,
+                                                                onClick = { onPlaySpotifyPlaylist(pl) },
+                                                                modifier = Modifier.size(34.dp),
+                                                            ) {
+                                                                Icon(Icons.Rounded.PlayArrow, contentDescription = "Reproducir", tint = Color(0xFF1DB954))
+                                                            }
+                                                            IconButton(
+                                                                enabled = !spotifySyncing,
+                                                                onClick = { onImportSpotifyPlaylist(pl) },
+                                                                modifier = Modifier.size(34.dp),
+                                                            ) {
+                                                                Icon(Icons.Rounded.Download, contentDescription = "Importar", tint = Color.White)
+                                                            }
                                                         }
                                                     }
                                                 }

@@ -91,6 +91,7 @@ import com.croix.player.prime.ui.screens.SearchScreen
 import com.croix.player.prime.ui.screens.SettingsAndStudioOverlay
 import com.croix.player.prime.ui.screens.ShazamRadarOverlay
 import com.croix.player.prime.ui.screens.SpotifyLoginOverlay
+import com.croix.player.prime.ui.screens.YtMusicAuthFlowMode
 import com.croix.player.prime.ui.screens.YtMusicLoginOverlay
 import com.croix.prime.design.CroixAnimatedBackdrop
 import com.croix.prime.design.CroixGlassCard
@@ -167,6 +168,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val serverNotice by vm.serverNotice.collectAsState()
     val audioCacheBytes by vm.audioCacheBytes.collectAsState()
     val shazamState by vm.shazamState.collectAsState()
+    val pendingYtChannelSwitchUrl by vm.pendingYtChannelSwitchUrl.collectAsState()
 
     var currentRoute by remember { mutableStateOf(design.defaultStartTab.route) }
     var startTabApplied by remember { mutableStateOf(false) }
@@ -174,10 +176,21 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     var settingsOpen by remember { mutableStateOf(false) }
     var spotifyLoginOpen by remember { mutableStateOf(false) }
     var ytMusicLoginOpen by remember { mutableStateOf(false) }
-    var ytMusicAddAnother by remember { mutableStateOf(false) }
+    var ytMusicAuthMode by remember { mutableStateOf(YtMusicAuthFlowMode.SIGN_IN) }
+    var ytMusicTargetSigninUrl by remember { mutableStateOf("") }
     var trackForMenu by remember { mutableStateOf<Track?>(null) }
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var quickNewPlaylistName by remember { mutableStateOf("") }
+
+    LaunchedEffect(pendingYtChannelSwitchUrl) {
+        val url = pendingYtChannelSwitchUrl
+        if (!url.isNullOrBlank()) {
+            ytMusicAuthMode = YtMusicAuthFlowMode.SWITCH_CHANNEL
+            ytMusicTargetSigninUrl = url
+            ytMusicLoginOpen = true
+            vm.consumePendingYtChannelSwitchUrl()
+        }
+    }
 
     // Apply persisted start tab once on cold launch without overriding manual tab switches
     LaunchedEffect(design.defaultStartTab) {
@@ -303,6 +316,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                                 favoriteIds = favoriteIds,
                                 ytMusicConnected = serverState.isYtMusicConnected,
                                 spotifyConnected = serverState.isSpotifyConnected,
+                                spotifyHomeMixes = serverState.spotifyTaste.homeMixes,
                                 aiReady = serverState.aiConfig.isReady,
                                 aiCurator = aiCurator,
                                 privateSessionEnabled = design.privateSessionEnabled,
@@ -311,6 +325,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                                 isLoading = homeLoading,
                                 bottomPaddingDp = bottomClearance,
                                 onPlayFlow = vm::startCroixFlow,
+                                onPlaySpotifyHomeMix = vm::playSpotifyHomeMix,
                                 onStartHiddenGems = vm::startHiddenGemsRadar,
                                 onStartBlindDiscovery = {
                                     vm.startBlindDiscoveryMode()
@@ -607,11 +622,18 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onUpdateServerConfig = vm::updateServerConfig,
                     onPingServer = vm::pingServer,
                     onOpenYtMusicLogin = {
-                        ytMusicAddAnother = false
+                        ytMusicAuthMode = YtMusicAuthFlowMode.SIGN_IN
+                        ytMusicTargetSigninUrl = ""
                         ytMusicLoginOpen = true
                     },
                     onOpenAddYtMusicAccount = {
-                        ytMusicAddAnother = true
+                        ytMusicAuthMode = YtMusicAuthFlowMode.ADD_ACCOUNT
+                        ytMusicTargetSigninUrl = ""
+                        ytMusicLoginOpen = true
+                    },
+                    onOpenSwitchYtChannelWebView = {
+                        ytMusicAuthMode = YtMusicAuthFlowMode.SWITCH_CHANNEL
+                        ytMusicTargetSigninUrl = ""
                         ytMusicLoginOpen = true
                     },
                     onSyncYtMusicNow = { vm.syncYtMusicLibrary(silent = false) },
@@ -632,6 +654,15 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     },
                     onDisconnectSpotify = vm::disconnectSpotify,
                     onImportSpotifyPlaylist = vm::importSpotifyPlaylist,
+                    onPlaySpotifyPlaylist = { pl ->
+                        vm.playSpotifyPlaylist(pl)
+                        settingsOpen = false
+                    },
+                    onPlaySpotifyHomeMix = { mix ->
+                        vm.playSpotifyHomeMix(mix)
+                        settingsOpen = false
+                    },
+                    onSyncSpotifyLikesToFavs = vm::syncSpotifyLikesToFavorites,
                     onCheckUpdates = vm::checkForUpdates,
                 )
             }
@@ -668,7 +699,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 )
             }
 
-            // In-App YouTube Music Account Login WebView
+            // In-App YouTube Music Account Login / Switch Channel WebView
             AnimatedVisibility(
                 visible = ytMusicLoginOpen,
                 enter = fadeIn(tween(220)) + slideInVertically(tween(280)) { it / 3 },
@@ -676,10 +707,16 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 modifier = Modifier.zIndex(20f),
             ) {
                 YtMusicLoginOverlay(
-                    isAddingAnotherAccount = ytMusicAddAnother,
-                    onDismiss = { ytMusicLoginOpen = false },
+                    mode = ytMusicAuthMode,
+                    existingCookie = serverState.serverConfig.ytMusicCookie,
+                    targetSigninUrl = ytMusicTargetSigninUrl,
+                    onDismiss = {
+                        ytMusicLoginOpen = false
+                        ytMusicTargetSigninUrl = ""
+                    },
                     onAuthCaptured = { cookie, visitorData, dataSyncId, authUser ->
                         ytMusicLoginOpen = false
+                        ytMusicTargetSigninUrl = ""
                         vm.connectYtMusicAccount(cookie, visitorData, dataSyncId, authUser)
                     },
                 )

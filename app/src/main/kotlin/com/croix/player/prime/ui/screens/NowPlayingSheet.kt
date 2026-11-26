@@ -1080,6 +1080,7 @@ fun NowPlayingOverlay(
                         2 -> QueueProPanel(
                             queue = playback.queue,
                             currentIndex = playback.currentIndex,
+                            isExpandingQueue = playback.isExpandingQueue,
                             blindDiscoveryMode = playback.blindDiscoveryMode,
                             onSelect = onSelectQueueIndex,
                             onRemove = onRemoveQueueIndex,
@@ -1806,6 +1807,7 @@ private fun SyncedLyricsProPanel(
 private fun QueueProPanel(
     queue: List<Track>,
     currentIndex: Int,
+    isExpandingQueue: Boolean,
     blindDiscoveryMode: Boolean,
     onSelect: (Int) -> Unit,
     onRemove: (Int) -> Unit,
@@ -1817,8 +1819,62 @@ private fun QueueProPanel(
     var showSaveDialog by remember { mutableStateOf(false) }
     var playlistName by remember { mutableStateOf("") }
     var dedupeNotice by remember { mutableStateOf<String?>(null) }
+    val remainingCount = (queue.size - currentIndex - 1).coerceAtLeast(0)
 
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        CroixGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 14.dp,
+            accentTint = if (isExpandingQueue) palette.secondary else null,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text(
+                        text = "Cola activa • ${queue.size} canciones",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                    )
+                    Text(
+                        text = "$remainingCount siguientes • regeneración automática",
+                        fontSize = 11.sp,
+                        color = palette.textSecondary,
+                    )
+                }
+                if (isExpandingQueue) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            color = palette.secondary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            text = "Ampliando...",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.secondary,
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "∞ Infinita",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.primary,
+                    )
+                }
+            }
+        }
+
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CroixGlassCard(
                 modifier = Modifier.weight(1f),

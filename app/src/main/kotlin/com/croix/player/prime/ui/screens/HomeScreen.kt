@@ -82,6 +82,7 @@ import com.croix.prime.engine.HomeFeedBundle
 import com.croix.prime.engine.HomeSection
 import com.croix.prime.engine.MoodChip
 import com.croix.prime.engine.RelatedArtist
+import com.croix.prime.engine.SpotifyHomeMixSummary
 import com.croix.prime.engine.Track
 import java.util.Calendar
 
@@ -93,6 +94,7 @@ fun HomeScreen(
     favoriteIds: Set<String>,
     ytMusicConnected: Boolean,
     spotifyConnected: Boolean,
+    spotifyHomeMixes: List<SpotifyHomeMixSummary> = emptyList(),
     aiReady: Boolean,
     aiCurator: AiCuratorUiState,
     privateSessionEnabled: Boolean,
@@ -101,6 +103,7 @@ fun HomeScreen(
     isLoading: Boolean,
     bottomPaddingDp: Int,
     onPlayFlow: (MoodChip?) -> Unit,
+    onPlaySpotifyHomeMix: (SpotifyHomeMixSummary) -> Unit = {},
     onStartHiddenGems: () -> Unit,
     onStartBlindDiscovery: () -> Unit,
     onGenerateAiCurator: (String) -> Unit,
@@ -684,6 +687,37 @@ fun HomeScreen(
             }
         }
 
+        // 3b. Real Spotify Home Mixes (Daily Mixes, Discover Weekly, Daylist, Release Radar)
+        if (spotifyConnected && spotifyHomeMixes.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 18.dp)) {
+                        Text(
+                            text = if (strings.isSpanish) "Mixes de tu Spotify" else "Your Spotify Mixes",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = Color.White,
+                        )
+                        Text(
+                            text = if (strings.isSpanish) "Daily Mix, Descubrimiento Semanal y Daylist reproducibles al instante" else "Daily Mixes, Discover Weekly & Daylist playable instantly",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF1DB954),
+                        )
+                    }
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 18.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        items(spotifyHomeMixes, key = { "sp_mix_${it.id}" }) { mix ->
+                            SpotifyHomeMixCard(
+                                mix = mix,
+                                onPlay = { onPlaySpotifyHomeMix(mix) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // 4. Editorial "Hecho para ti — Mixes Diarios" Poster Cards
         if (design.showDailyMixes && feed.dailyMixes.isNotEmpty()) {
             item {
@@ -842,6 +876,104 @@ fun HomeScreen(
                     cardSize = cardSize,
                     onPlayTrack = onPlayTrack,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpotifyHomeMixCard(
+    mix: SpotifyHomeMixSummary,
+    onPlay: () -> Unit,
+) {
+    val accent = Color(mix.accentHex)
+    CroixGlassCard(
+        modifier = Modifier
+            .width(172.dp)
+            .height(214.dp),
+        accentTint = accent,
+        onClick = onPlay,
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (mix.thumbnailUrl.isNotBlank()) {
+                AsyncImage(
+                    model = mix.thumbnailUrl,
+                    contentDescription = mix.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                accent.copy(alpha = 0.28f),
+                                Color.Black.copy(alpha = 0.42f),
+                                Color.Black.copy(alpha = 0.88f),
+                            ),
+                        ),
+                    ),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(Color(0xFF1DB954).copy(alpha = 0.88f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            text = "SPOTIFY",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Black,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1DB954)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Rounded.PlayArrow,
+                            contentDescription = "Reproducir Mix",
+                            tint = Color.Black,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = mix.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (mix.description.isNotBlank()) {
+                        Text(
+                            text = mix.description,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.82f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }

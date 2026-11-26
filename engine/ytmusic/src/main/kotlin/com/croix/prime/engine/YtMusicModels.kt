@@ -140,12 +140,16 @@ data class YtMusicAccountProfile(
     val avatarUrl: String = "",
     val pageId: String = "",
     val dataSyncId: String = "",
+    val signinUrl: String = "",
     val authUser: String = "0",
     val byline: String = "",
     val isSelected: Boolean = false,
 ) {
     val profileKey: String
-        get() = pageId.ifBlank { dataSyncId }.ifBlank { channelHandle }.ifBlank { name }
+        get() = pageId.ifBlank { dataSyncId }.ifBlank { signinUrl }.ifBlank { channelHandle }.ifBlank { name }
+
+    val effectiveIdentityToken: String
+        get() = pageId.trim().ifBlank { dataSyncId.substringBefore("||").trim() }
 }
 
 @Serializable

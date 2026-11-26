@@ -61,6 +61,7 @@ import com.croix.prime.engine.ServerHealthStatus
 import com.croix.prime.engine.ShazamMatch
 import com.croix.prime.engine.ShazamRecognitionClient
 import com.croix.prime.engine.SponsorBlockClient
+import com.croix.prime.engine.SpotifyHomeMixSummary
 import com.croix.prime.engine.SpotifyPlaylistSummary
 import com.croix.prime.engine.SpotifyTasteClient
 import com.croix.prime.engine.SpotifyTasteSnapshot
@@ -179,6 +180,13 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     private val _shazamState = MutableStateFlow(ShazamUiState())
     val shazamState: StateFlow<ShazamUiState> = _shazamState.asStateFlow()
 
+    private val _pendingYtChannelSwitchUrl = MutableStateFlow<String?>(null)
+    val pendingYtChannelSwitchUrl: StateFlow<String?> = _pendingYtChannelSwitchUrl.asStateFlow()
+
+    fun consumePendingYtChannelSwitchUrl() {
+        _pendingYtChannelSwitchUrl.value = null
+    }
+
     val playerController = CroixPlayerController(
         context = appContext,
         innerTube = innerTube,
@@ -200,6 +208,29 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                 }
                 AutoEqHeadphoneProfile.entries.firstOrNull { it.name == key }
             }
+        },
+        deepQueueExpander = { anchorTrack, existingQueue, targetSize, onWaveReady ->
+            val session = serverState.value
+            val affinityArtists = buildSet {
+                favorites.value.take(30).forEach { add(it.artist) }
+                history.value.take(30).forEach { add(it.artist) }
+                session.ytMusicHistoryTracks.take(25).forEach { add(it.artist) }
+                if (session.isSpotifyConnected) {
+                    session.spotifyTaste.allSeedArtistNames.take(35).forEach { add(it) }
+                }
+            }
+            val blocked = blockedArtists.value.map { it.artistKey }.toSet()
+            hybridEngine.expandQueueSpotifyStyle(
+                anchorTrack = anchorTrack,
+                initialExistingQueue = existingQueue,
+                targetQueueSize = targetSize,
+                userAffinityArtists = affinityArtists,
+                blockedArtistKeys = blocked,
+                spotifyClient = if (session.isSpotifyConnected) spotifyClient else null,
+                spotifySpDc = session.spotifySpDc,
+                spotifySpKey = session.spotifySpKey,
+                onWaveReady = onWaveReady,
+            )
         },
     )
 
@@ -368,7 +399,8 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     private fun observeServerConfig() {
         viewModelScope.launch {
             var initialized = false
-            var autoSyncedOnLaunch = false
+            var autoSyncedYtOnLaunch = false
+            var autoSyncedSpotifyOnLaunch = false
             serverState.collect { session ->
                 innerTube.updateServerConfig(session.serverConfig)
                 _adsBlockedCount.value = AdBlockEngine.blockedCount.get()
@@ -376,8 +408,8 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                     initialized = true
                     pingServer()
                 }
-                if (!autoSyncedOnLaunch && session.isYtMusicConnected) {
-                    autoSyncedOnLaunch = true
+                if (!autoSyncedYtOnLaunch && session.isYtMusicConnected) {
+                    autoSyncedYtOnLaunch = true
                     if (session.ytMusicBrandProfiles.isEmpty()) {
                         refreshYtMusicBrandProfiles()
                     }
@@ -385,6 +417,16 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                         syncYtMusicLibrary(silent = true)
                     } else {
                         refreshHome()
+                    }
+                }
+                if (!autoSyncedSpotifyOnLaunch && session.spotifySpDc.isNotBlank()) {
+                    autoSyncedSpotifyOnLaunch = true
+                    val ageMs = System.currentTimeMillis() - session.spotifyTaste.lastSyncedEpochMs
+                    val needsRefresh = !session.spotifyTaste.connected ||
+                        session.spotifyTaste.homeMixes.isEmpty() ||
+                        ageMs > 20L * 60_000L
+                    if (needsRefresh) {
+                        syncSpotifyTasteSilent(session.spotifySpDc, session.spotifySpKey)
                     }
                 }
             }
@@ -716,9 +758,9 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
             val familiar = history.value.shuffled()
             val knownIds = (favs.map { it.id } + familiar.map { it.id } + currentTrack.id).toSet()
             val discovery = withContext(Dispatchers.IO) {
-                val radio = innerTube.fetchRadioQueue(currentTrack.id, limit = 24)
+                val radio = innerTube.fetchRadioQueue(currentTrack.id, limit = 85)
                 val fresh = radio.filter { it.id !in knownIds && !HybridAlgorithmEngine.isBlockedArtist(it.artist, blockedKeys) }
-                if (fresh.size >= 6) fresh else {
+                if (fresh.size >= 35) fresh else {
                     val fallback = _homeFeed.value.quickPicks + _homeFeed.value.shelves.flatMap { it.tracks }
                     (fresh + hybridEngine.buildHiddenGemsRadar(
                         knownTrackIds = knownIds,
@@ -1201,11 +1243,17 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             _ytMusicSyncing.value = true
             _serverNotice.value = "⏳ Conectando cuenta de YouTube Music..."
+            val dsParts = dataSyncId.split("||").map(String::trim).filter(String::isNotBlank)
+            val cleanDataSyncId = dsParts.firstOrNull().orEmpty()
+            val detectedPageId = if (dsParts.size >= 2) dsParts[0] else ""
+            val cleanAuthUser = authUser.filter(Char::isDigit).ifBlank { "0" }
+
             val res = innerTube.verifyYtMusicAccount(
                 cookie = cookie,
                 visitorData = visitorData,
-                dataSyncId = dataSyncId,
-                authUser = authUser,
+                dataSyncId = cleanDataSyncId,
+                pageId = detectedPageId,
+                authUser = cleanAuthUser,
             )
             res.onSuccess { profile ->
                 val brandProfiles = innerTube.fetchYtMusicBrandProfiles(
@@ -1214,18 +1262,29 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                     authUser = profile.authUser,
                 ).getOrElse { listOf(profile) }
                     .ifEmpty { listOf(profile) }
+                    .map { bp ->
+                        val matchesActive = (detectedPageId.isNotBlank() && bp.pageId == detectedPageId) ||
+                            (detectedPageId.isBlank() && bp.name.equals(profile.name, ignoreCase = true))
+                        bp.copy(isSelected = matchesActive || bp.isSelected)
+                    }
 
-                val accountId = profile.email.ifBlank { profile.channelHandle }.ifBlank { profile.name }.lowercase()
+                val uniqueAccountId = listOf(
+                    profile.email,
+                    profile.channelHandle,
+                    detectedPageId,
+                    profile.name,
+                ).filter { it.isNotBlank() }.joinToString("|").lowercase().ifBlank { "yt_${System.currentTimeMillis()}" }
+
                 val savedEntry = SavedYtMusicAccount(
-                    id = accountId,
+                    id = uniqueAccountId,
                     name = profile.name,
                     email = profile.email,
                     channelHandle = profile.channelHandle,
                     avatarUrl = profile.avatarUrl,
                     cookie = cookie,
                     visitorData = visitorData,
-                    dataSyncId = dataSyncId,
-                    pageId = "",
+                    dataSyncId = cleanDataSyncId,
+                    pageId = detectedPageId,
                     authUser = profile.authUser,
                 )
                 serverRepo.update { s ->
@@ -1236,16 +1295,19 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                         ytMusicAccountHandle = profile.channelHandle,
                         ytMusicAccountAvatarUrl = profile.avatarUrl,
                         ytMusicVisitorData = visitorData,
-                        ytMusicDataSyncId = dataSyncId,
-                        ytMusicPageId = "",
+                        ytMusicDataSyncId = cleanDataSyncId,
+                        ytMusicPageId = detectedPageId,
                         ytMusicAuthUser = profile.authUser,
                     )
                     innerTube.updateServerConfig(cfg)
-                    val updatedSaved = (s.savedYtAccounts.filterNot { it.id == accountId } + savedEntry)
+                    val updatedSaved = (s.savedYtAccounts.filterNot { it.id == uniqueAccountId } + savedEntry)
                     s.copy(
                         serverConfig = cfg,
                         ytMusicBrandProfiles = brandProfiles,
                         savedYtAccounts = updatedSaved,
+                        ytMusicHistoryTracks = emptyList(),
+                        ytMusicLikedTracks = emptyList(),
+                        ytMusicPlaylists = emptyList(),
                     )
                 }
                 _serverNotice.value = "✓ Cuenta conectada: ${profile.name}"
@@ -1261,6 +1323,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         val cfg = serverState.value.serverConfig
         if (!cfg.hasYtMusicAccount) return
         viewModelScope.launch {
+            _serverNotice.value = "⏳ Buscando perfiles y canales en tu cuenta..."
             val res = innerTube.fetchYtMusicBrandProfiles(
                 cookie = cfg.ytMusicCookie,
                 visitorData = cfg.ytMusicVisitorData,
@@ -1269,40 +1332,88 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
             res.onSuccess { list ->
                 if (list.isNotEmpty()) {
                     serverRepo.update { s -> s.copy(ytMusicBrandProfiles = list) }
+                    _serverNotice.value = "✓ ${list.size} perfil(es) encontrados en tu cuenta"
+                } else {
+                    _serverNotice.value = "Usa «Cambiar canal en YouTube Music» si tienes otro perfil"
                 }
+            }.onFailure {
+                _serverNotice.value = "Usa «Cambiar canal en YouTube Music» para elegir tu perfil"
             }
         }
     }
 
     /**
      * Switches between YouTube Brand Profiles / Channels under the same Google account!
+     * Verifies the switched identity against InnerTube and falls back to `signinUrl` WebView redirect
+     * whenever Google requires an interactive channel switch token.
      */
     fun switchYtMusicBrandProfile(profile: YtMusicAccountProfile) {
         val cur = serverState.value
         if (!cur.isYtMusicConnected) return
+        val cfg = cur.serverConfig
+        if (profile.effectiveIdentityToken.isBlank() && profile.signinUrl.isNotBlank()) {
+            _pendingYtChannelSwitchUrl.value = profile.signinUrl
+            return
+        }
         viewModelScope.launch {
             _ytMusicSyncing.value = true
             _serverNotice.value = "⏳ Cambiando al perfil ${profile.name}..."
+            val targetAuthUser = profile.authUser.filter(Char::isDigit).ifBlank { cfg.ytMusicAuthUser }
+            val verified = innerTube.verifyYtMusicAccount(
+                cookie = cfg.ytMusicCookie,
+                visitorData = cfg.ytMusicVisitorData,
+                dataSyncId = profile.dataSyncId,
+                pageId = profile.pageId,
+                authUser = targetAuthUser,
+            ).getOrNull()
+
+            val resolvedName = verified?.name?.takeIf { it.isNotBlank() && it != "Cuenta YouTube Music" } ?: profile.name
+            val resolvedHandle = verified?.channelHandle?.ifBlank { profile.channelHandle.ifBlank { profile.byline } }
+                ?: profile.channelHandle.ifBlank { profile.byline }
+            val resolvedAvatar = verified?.avatarUrl?.ifBlank { profile.avatarUrl } ?: profile.avatarUrl
+            val resolvedEmail = verified?.email?.ifBlank { cfg.ytMusicAccountEmail } ?: cfg.ytMusicAccountEmail
+
             serverRepo.update { s ->
                 val newCfg = s.serverConfig.copy(
-                    ytMusicAccountName = profile.name,
-                    ytMusicAccountHandle = profile.channelHandle.ifBlank { profile.byline },
-                    ytMusicAccountAvatarUrl = profile.avatarUrl.ifBlank { s.serverConfig.ytMusicAccountAvatarUrl },
+                    ytMusicAccountName = resolvedName,
+                    ytMusicAccountEmail = resolvedEmail,
+                    ytMusicAccountHandle = resolvedHandle,
+                    ytMusicAccountAvatarUrl = resolvedAvatar.ifBlank { s.serverConfig.ytMusicAccountAvatarUrl },
                     ytMusicPageId = profile.pageId,
-                    ytMusicDataSyncId = profile.dataSyncId.ifBlank { s.serverConfig.ytMusicDataSyncId },
+                    ytMusicDataSyncId = profile.dataSyncId,
+                    ytMusicAuthUser = targetAuthUser,
                 )
                 innerTube.updateServerConfig(newCfg)
                 val updatedProfiles = s.ytMusicBrandProfiles.map { p ->
                     p.copy(isSelected = p.profileKey == profile.profileKey)
                 }
+                val activeId = listOf(resolvedEmail, resolvedHandle, profile.pageId, resolvedName)
+                    .filter { it.isNotBlank() }.joinToString("|").lowercase()
+                val updatedSaved = if (activeId.isNotBlank()) {
+                    val entry = SavedYtMusicAccount(
+                        id = activeId,
+                        name = resolvedName,
+                        email = resolvedEmail,
+                        channelHandle = resolvedHandle,
+                        avatarUrl = resolvedAvatar.ifBlank { s.serverConfig.ytMusicAccountAvatarUrl },
+                        cookie = newCfg.ytMusicCookie,
+                        visitorData = newCfg.ytMusicVisitorData,
+                        dataSyncId = newCfg.ytMusicDataSyncId,
+                        pageId = newCfg.ytMusicPageId,
+                        authUser = newCfg.ytMusicAuthUser,
+                    )
+                    s.savedYtAccounts.filterNot { it.id == activeId } + entry
+                } else s.savedYtAccounts
                 s.copy(
                     serverConfig = newCfg,
                     ytMusicBrandProfiles = updatedProfiles,
+                    savedYtAccounts = updatedSaved,
                     ytMusicHistoryTracks = emptyList(),
                     ytMusicLikedTracks = emptyList(),
                     ytMusicPlaylists = emptyList(),
                 )
             }
+            _serverNotice.value = "✓ Perfil activo: $resolvedName"
             syncYtMusicLibrary(silent = false)
         }
     }
@@ -1314,12 +1425,20 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             _ytMusicSyncing.value = true
             _serverNotice.value = "⏳ Cambiando a cuenta ${account.name}..."
+            val verified = innerTube.verifyYtMusicAccount(
+                cookie = account.cookie,
+                visitorData = account.visitorData,
+                dataSyncId = account.dataSyncId,
+                pageId = account.pageId,
+                authUser = account.authUser,
+            ).getOrNull()
+
             val cfg = serverState.value.serverConfig.copy(
                 ytMusicCookie = account.cookie,
-                ytMusicAccountName = account.name,
-                ytMusicAccountEmail = account.email,
-                ytMusicAccountHandle = account.channelHandle,
-                ytMusicAccountAvatarUrl = account.avatarUrl,
+                ytMusicAccountName = verified?.name?.takeIf { it.isNotBlank() && it != "Cuenta YouTube Music" } ?: account.name,
+                ytMusicAccountEmail = verified?.email?.ifBlank { account.email } ?: account.email,
+                ytMusicAccountHandle = verified?.channelHandle?.ifBlank { account.channelHandle } ?: account.channelHandle,
+                ytMusicAccountAvatarUrl = verified?.avatarUrl?.ifBlank { account.avatarUrl } ?: account.avatarUrl,
                 ytMusicVisitorData = account.visitorData,
                 ytMusicDataSyncId = account.dataSyncId,
                 ytMusicPageId = account.pageId,
@@ -1333,14 +1452,26 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
             ).getOrElse { emptyList() }
 
             serverRepo.update { s ->
+                val refreshedSaved = s.savedYtAccounts.map { existing ->
+                    if (existing.id == account.id) {
+                        existing.copy(
+                            name = cfg.ytMusicAccountName,
+                            email = cfg.ytMusicAccountEmail,
+                            channelHandle = cfg.ytMusicAccountHandle,
+                            avatarUrl = cfg.ytMusicAccountAvatarUrl,
+                        )
+                    } else existing
+                }
                 s.copy(
                     serverConfig = cfg,
+                    savedYtAccounts = refreshedSaved,
                     ytMusicBrandProfiles = profiles,
                     ytMusicHistoryTracks = emptyList(),
                     ytMusicLikedTracks = emptyList(),
                     ytMusicPlaylists = emptyList(),
                 )
             }
+            _serverNotice.value = "✓ Cuenta activa: ${cfg.ytMusicAccountName}"
             syncYtMusicLibrary(silent = false)
         }
     }
@@ -1506,7 +1637,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         if (cleanDc.isBlank()) return
         viewModelScope.launch {
             _spotifySyncing.value = true
-            _serverNotice.value = "..."
+            _serverNotice.value = "⏳ Sincronizando perfil, Mixes y algoritmo de Spotify..."
             spotifyClient.clearCachedToken()
             val res = spotifyClient.syncTasteProfile(cleanDc, spKey.trim())
             res.onSuccess { snapshot ->
@@ -1517,10 +1648,23 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                         spotifyTaste = snapshot,
                     )
                 }
-                _serverNotice.value = "✓ Spotify: ${snapshot.accountName} (${snapshot.topArtists.size} artistas, ${snapshot.allSeedTracks.size} temas)"
+                _serverNotice.value = "✓ Spotify: ${snapshot.accountName} (${snapshot.topArtists.size} artistas • ${snapshot.relatedArtists.size} similares • ${snapshot.homeMixes.size} mixes • ${snapshot.playlists.size} playlists)"
                 refreshHome()
             }.onFailure { err ->
                 _serverNotice.value = "✕ Spotify: ${err.message ?: "Error de sesión"}"
+            }
+            _spotifySyncing.value = false
+        }
+    }
+
+    private fun syncSpotifyTasteSilent(spDc: String, spKey: String) {
+        viewModelScope.launch {
+            if (_spotifySyncing.value) return@launch
+            _spotifySyncing.value = true
+            val res = spotifyClient.syncTasteProfile(spDc, spKey)
+            res.onSuccess { snapshot ->
+                serverRepo.update { s -> s.copy(spotifyTaste = snapshot) }
+                refreshHome()
             }
             _spotifySyncing.value = false
         }
@@ -1530,6 +1674,107 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         val s = serverState.value
         if (s.spotifySpDc.isBlank()) return
         connectSpotifyCookies(s.spotifySpDc, s.spotifySpKey)
+    }
+
+    fun playSpotifyPlaylist(playlist: SpotifyPlaylistSummary) {
+        playSpotifyCollection(playlist.id, playlist.name)
+    }
+
+    fun playSpotifyHomeMix(mix: SpotifyHomeMixSummary) {
+        playSpotifyCollection(mix.id, mix.name)
+    }
+
+    private fun playSpotifyCollection(playlistId: String, title: String) {
+        val session = serverState.value
+        if (session.spotifySpDc.isBlank()) {
+            _serverNotice.value = "Conecta tu cuenta de Spotify para reproducir «$title»"
+            return
+        }
+        viewModelScope.launch {
+            _spotifySyncing.value = true
+            _serverNotice.value = "⏳ Cargando «$title» desde Spotify..."
+            val seedsRes = spotifyClient.fetchPlaylistTracks(
+                spDc = session.spotifySpDc,
+                spKey = session.spotifySpKey,
+                playlistId = playlistId,
+                limit = 120,
+            )
+            seedsRes.onSuccess { seeds ->
+                if (seeds.isEmpty()) {
+                    _serverNotice.value = "✕ No se encontraron canciones en «$title»"
+                    _spotifySyncing.value = false
+                    return@onSuccess
+                }
+                // Match first 12 tracks fast so playback starts almost immediately!
+                val initialMatched = hybridEngine.matchSpotifyTracksToYtMusic(seeds.take(12), maxTracks = 12)
+                if (initialMatched.isEmpty()) {
+                    _serverNotice.value = "✕ No se pudieron emparejar canciones de «$title»"
+                    _spotifySyncing.value = false
+                    return@onSuccess
+                }
+                val first = initialMatched.first()
+                playerController.playTrack(first, initialMatched, autoFetchRadio = true)
+                _serverNotice.value = "▶ Reproduciendo «$title» (${seeds.size} pistas + cola inteligente)"
+                _spotifySyncing.value = false
+
+                // Progressively match the remaining tracks in background and inject right into the active queue
+                val restSeeds = seeds.drop(12)
+                if (restSeeds.isNotEmpty()) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        restSeeds.chunked(18).forEach { chunk ->
+                            val matchedChunk = hybridEngine.matchSpotifyTracksToYtMusic(chunk, maxTracks = 18)
+                            if (matchedChunk.isNotEmpty()) {
+                                withContext(Dispatchers.Main) {
+                                    playerController.appendTracksToActiveQueue(matchedChunk, expectedSessionTrackId = first.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }.onFailure { err ->
+                _serverNotice.value = "✕ Spotify: ${err.message ?: "Error al cargar «$title»"}"
+                _spotifySyncing.value = false
+            }
+        }
+    }
+
+    fun syncSpotifyLikesToFavorites() {
+        val taste = serverState.value.spotifyTaste
+        val likedSeeds = taste.likedTracks
+        if (likedSeeds.isEmpty()) {
+            _serverNotice.value = "Sincroniza Spotify primero para importar tus Me gusta"
+            return
+        }
+        viewModelScope.launch {
+            _spotifySyncing.value = true
+            _serverNotice.value = "⏳ Importando tus Me gusta de Spotify (${likedSeeds.size})..."
+            val matched = hybridEngine.matchSpotifyTracksToYtMusic(likedSeeds, maxTracks = 80)
+            var added = 0
+            withContext(Dispatchers.IO) {
+                val existing = favorites.value.map { it.id }.toHashSet()
+                matched.forEach { t ->
+                    if (existing.add(t.id)) {
+                        dao.addFavorite(
+                            FavoriteTrackEntity(
+                                id = t.id,
+                                title = t.title,
+                                artist = t.artist,
+                                album = t.album,
+                                durationSeconds = t.durationSeconds,
+                                thumbnailUrl = t.thumbnailUrl,
+                            ),
+                        )
+                        added++
+                    }
+                }
+            }
+            _serverNotice.value = if (added > 0) {
+                "✓ $added canciones de tus Me gusta de Spotify añadidas a Favoritos"
+            } else {
+                "✓ Tus Me gusta de Spotify ya estaban en Favoritos"
+            }
+            _spotifySyncing.value = false
+        }
     }
 
     fun setSpotifyBlendWeight(weight: Float) {
@@ -1558,15 +1803,15 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         if (session.spotifySpDc.isBlank()) return
         viewModelScope.launch {
             _spotifySyncing.value = true
-            _serverNotice.value = "⏳ ${playlist.name}..."
+            _serverNotice.value = "⏳ Importando ${playlist.name}..."
             val seedsRes = spotifyClient.fetchPlaylistTracks(
                 spDc = session.spotifySpDc,
                 spKey = session.spotifySpKey,
                 playlistId = playlist.id,
-                limit = 60,
+                limit = 120,
             )
             seedsRes.onSuccess { seeds ->
-                val matched = hybridEngine.matchSpotifyTracksToYtMusic(seeds, maxTracks = 50)
+                val matched = hybridEngine.matchSpotifyTracksToYtMusic(seeds, maxTracks = 100)
                 if (matched.isNotEmpty()) {
                     withContext(Dispatchers.IO) {
                         val pid = dao.insertPlaylist(UserPlaylistEntity(name = "${playlist.name} (Spotify)"))

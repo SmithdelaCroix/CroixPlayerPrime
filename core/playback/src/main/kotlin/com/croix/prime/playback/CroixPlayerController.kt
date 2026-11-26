@@ -98,6 +98,7 @@ data class PlaybackUiState(
     val techSpecs: AudioTechnicalSpecs = AudioTechnicalSpecs(),
     val queue: List<Track> = emptyList(),
     val currentIndex: Int = -1,
+    val isExpandingQueue: Boolean = false,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
     val durationMs: Long = 0L,
@@ -139,6 +140,12 @@ class CroixPlayerController(
     private val autoPlayRelatedProvider: () -> Boolean = { true },
     private val blockedArtistKeysProvider: () -> Set<String> = { emptySet() },
     private val autoOutputProfileResolver: (AudioOutputRoute) -> AutoEqHeadphoneProfile? = { null },
+    private val deepQueueExpander: (suspend (
+        anchorTrack: Track,
+        existingQueue: List<Track>,
+        targetSize: Int,
+        onWaveReady: suspend (List<Track>) -> Unit,
+    ) -> Unit)? = null,
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -154,6 +161,7 @@ class CroixPlayerController(
     private var controller: MediaController? = null
     private val controllerReady = CompletableDeferred<MediaController>()
     private var playJob: Job? = null
+    private var queueExpandJob: Job? = null
     private var sleepJob: Job? = null
     private var crossfadeTriggeredForTrackId: String? = null
     private var activeClientKey: String = ""
@@ -310,12 +318,14 @@ class CroixPlayerController(
     ) {
         val queueList = if (newQueue.any { it.id == track.id }) newQueue else listOf(track) + newQueue
         val idx = queueList.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+        queueExpandJob?.cancel()
         _positionMs.value = 0L
         _state.update {
             it.copy(
                 currentTrack = track,
                 queue = queueList,
                 currentIndex = idx,
+                isExpandingQueue = false,
                 isBuffering = true,
                 durationMs = track.durationSeconds * 1000L,
                 sponsorSegments = emptyList(),
@@ -326,41 +336,88 @@ class CroixPlayerController(
         }
         startPlayingInternal(track)
 
-        if (autoFetchRadio && queueList.size <= 5) {
-            scope.launch {
-                val blocked = blockedArtistKeysProvider()
-                val rawRadio = innerTube.fetchRadioQueue(track.id, limit = 60)
-                var filtered = HybridAlgorithmEngine.filterRelatedRadioTracks(
-                    candidates = rawRadio,
-                    existingQueue = _state.value.queue,
-                    blockedArtistKeys = blocked,
-                )
-                if (filtered.size < 14 && track.artist.isNotBlank()) {
-                    val primaryArtist = track.artist.split(",", "&", "feat.", "ft.", ignoreCase = true).firstOrNull()?.trim().orEmpty()
-                    if (primaryArtist.isNotBlank()) {
-                        val fallback = innerTube.searchSongs("$primaryArtist canciones populares mix", limit = 25)
-                        filtered = filtered + HybridAlgorithmEngine.filterRelatedRadioTracks(
-                            candidates = fallback,
-                            existingQueue = _state.value.queue + filtered,
-                            blockedArtistKeys = blocked,
-                        )
+        if (autoFetchRadio && autoPlayRelatedProvider()) {
+            // EVERY queue expands massively to 160-220+ coherent tracks (Spotify-style deep radio + artist graph)!
+            val anchorForExpansion = queueList.lastOrNull()?.takeIf { queueList.size > 1 } ?: track
+            val targetSize = if (blindDiscovery) {
+                maxOf(queueList.size + 90, 140)
+            } else {
+                maxOf(queueList.size + 145, 200)
+            }
+            launchDeepQueueExpansion(
+                anchorTrack = if (queueList.size <= 3) track else anchorForExpansion,
+                targetSize = targetSize,
+                sessionMarkerTrackId = track.id,
+                replaceExisting = true,
+            )
+        }
+    }
+
+    /**
+     * Appends matched tracks cleanly into the active queue right behind existing tracks
+     * (used for progressive instant Spotify playlist / Home Mix streaming!).
+     */
+    fun appendTracksToActiveQueue(tracks: List<Track>, expectedSessionTrackId: String? = null) {
+        if (tracks.isEmpty()) return
+        _state.update { cur ->
+            if (expectedSessionTrackId != null && cur.queue.none { it.id == expectedSessionTrackId }) {
+                return@update cur
+            }
+            val existingIds = cur.queue.map { it.id }.toHashSet()
+            val toAdd = tracks.filter { existingIds.add(it.id) }
+            if (toAdd.isEmpty()) cur else cur.copy(queue = cur.queue + toAdd)
+        }
+    }
+
+    private fun launchDeepQueueExpansion(
+        anchorTrack: Track,
+        targetSize: Int,
+        sessionMarkerTrackId: String,
+        replaceExisting: Boolean,
+    ) {
+        if (!replaceExisting && queueExpandJob?.isActive == true) return
+        if (replaceExisting) queueExpandJob?.cancel()
+        queueExpandJob = scope.launch {
+            _state.update { it.copy(isExpandingQueue = true) }
+            try {
+                val expander = deepQueueExpander
+                if (expander != null) {
+                    expander.invoke(anchorTrack, _state.value.queue, targetSize) { wave ->
+                        if (wave.isEmpty()) return@invoke
+                        val blocked = blockedArtistKeysProvider()
+                        var firstAdded: Track? = null
+                        _state.update { cur ->
+                            if (cur.queue.none { it.id == sessionMarkerTrackId }) return@update cur
+                            val existingIds = cur.queue.map { it.id }.toHashSet()
+                            val cleanToAdd = wave.filter {
+                                it.id !in existingIds && !HybridAlgorithmEngine.isBlockedArtist(it.artist, blocked)
+                            }
+                            if (cleanToAdd.isEmpty()) return@update cur
+                            if (firstAdded == null) firstAdded = cleanToAdd.firstOrNull()
+                            cur.copy(queue = cur.queue + cleanToAdd)
+                        }
+                        val nextUpcoming = _state.value.queue.getOrNull(_state.value.currentIndex + 1) ?: firstAdded
+                        if (nextUpcoming != null && localFileProvider(nextUpcoming.id) == null) {
+                            launch(Dispatchers.IO) { innerTube.prefetchAudioStream(nextUpcoming.id) }
+                        }
                     }
-                }
-                if (filtered.isNotEmpty() && _state.value.currentTrack?.id == track.id) {
-                    _state.update { cur ->
-                        val cleanToAdd = HybridAlgorithmEngine.filterRelatedRadioTracks(
-                            candidates = filtered,
-                            existingQueue = cur.queue,
-                            blockedArtistKeys = blocked,
-                        )
-                        cur.copy(queue = cur.queue + cleanToAdd)
-                    }
-                    filtered.firstOrNull()?.let { nextTrack ->
-                        if (localFileProvider(nextTrack.id) == null) {
-                            launch(Dispatchers.IO) { innerTube.prefetchAudioStream(nextTrack.id) }
+                } else {
+                    val blocked = blockedArtistKeysProvider()
+                    val rawRadio = innerTube.fetchRadioQueue(anchorTrack.id, limit = 90)
+                    if (rawRadio.isNotEmpty()) {
+                        _state.update { cur ->
+                            if (cur.queue.none { it.id == sessionMarkerTrackId }) return@update cur
+                            val cleanToAdd = HybridAlgorithmEngine.filterRelatedRadioTracks(
+                                candidates = rawRadio,
+                                existingQueue = cur.queue,
+                                blockedArtistKeys = blocked,
+                            )
+                            cur.copy(queue = cur.queue + cleanToAdd)
                         }
                     }
                 }
+            } finally {
+                _state.update { it.copy(isExpandingQueue = false) }
             }
         }
     }
@@ -602,29 +659,29 @@ class CroixPlayerController(
                 }
                 applyAudioEffects()
 
-                // Lookahead prefetch for the NEXT track so skipping / auto-advancing is instant!
+                // Lookahead prefetch for next 2 tracks + Endless Auto-Regeneration (+115 tracks when remaining <= 35!)
                 launch(Dispatchers.IO) {
                     val q = _state.value.queue
                     val nextIdx = _state.value.currentIndex + 1
-                    val nextTrack = q.getOrNull(nextIdx)
-                    if (nextTrack != null && localFileProvider(nextTrack.id) == null) {
-                        innerTube.prefetchAudioStream(nextTrack.id)
-                    }
-                    // Deep Smart Autoplay: keep queue extensively stocked (50-80+ songs!) when approaching last 12 tracks
-                    if (autoPlayRelatedProvider() && q.size - nextIdx <= 12) {
-                        val anchorId = q.lastOrNull()?.id ?: track.id
-                        val more = innerTube.fetchRadioQueue(anchorId, limit = 42)
-                        if (more.isNotEmpty()) {
-                            val blocked = blockedArtistKeysProvider()
-                            _state.update { cur ->
-                                val filteredMore = HybridAlgorithmEngine.filterRelatedRadioTracks(
-                                    candidates = more,
-                                    existingQueue = cur.queue,
-                                    blockedArtistKeys = blocked,
-                                )
-                                cur.copy(queue = cur.queue + filteredMore)
-                            }
+                    q.getOrNull(nextIdx)?.let { nextTrack ->
+                        if (localFileProvider(nextTrack.id) == null) {
+                            innerTube.prefetchAudioStream(nextTrack.id)
                         }
+                    }
+                    q.getOrNull(nextIdx + 1)?.let { nextNext ->
+                        if (localFileProvider(nextNext.id) == null) {
+                            innerTube.prefetchAudioStream(nextNext.id)
+                        }
+                    }
+                    val remaining = q.size - nextIdx
+                    if (autoPlayRelatedProvider() && remaining <= 35 && queueExpandJob?.isActive != true) {
+                        val anchor = q.lastOrNull() ?: track
+                        launchDeepQueueExpansion(
+                            anchorTrack = anchor,
+                            targetSize = q.size + 115,
+                            sessionMarkerTrackId = track.id,
+                            replaceExisting = false,
+                        )
                     }
                 }
             }.onFailure { err ->
@@ -930,6 +987,7 @@ class CroixPlayerController(
     fun release() {
         sleepJob?.cancel()
         playJob?.cancel()
+        queueExpandJob?.cancel()
         outputMonitor.release()
         runCatching { equalizer?.release() }
         runCatching { bassBoost?.release() }

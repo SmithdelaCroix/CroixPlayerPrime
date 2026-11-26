@@ -227,9 +227,10 @@ class InnerTubeClient(
     }
 
     /**
-     * Metrolist-style YouTube Brand Account / Multi-Channel Discovery:
-     * Calls `www.youtube.com/youtubei/v1/account/accounts_list` (WEB client) so ALL channels/profiles
-     * under the same Google account are returned (pageId, dataSyncId, avatarUrl, handle).
+     * Real YouTube Brand Account / Multi-Channel Discovery (matching battle-tested WEB accounts_list):
+     * Queries `www.youtube.com/youtubei/v1/account/accounts_list` (no unsupported fields) so ALL channels
+     * under the same Gmail are returned with pageId, dataSyncId, signinUrl, handle, and avatar.
+     * Falls back to `music.youtube.com` if needed.
      */
     suspend fun fetchYtMusicBrandProfiles(
         cookie: String = serverConfig.ytMusicCookie,
@@ -237,72 +238,90 @@ class InnerTubeClient(
         authUser: String = serverConfig.ytMusicAuthUser,
     ): Result<List<YtMusicAccountProfile>> = withContext(Dispatchers.IO) {
         runCatching {
-            val auth = SapisidAuthSigner.buildAuthHeader(cookie, origin = "https://www.youtube.com")
-                ?: error("Sin sesión activa de YouTube")
-            val payload = buildJsonObject {
-                putJsonObject("context") {
-                    putJsonObject("client") {
-                        put("clientName", "WEB")
-                        put("clientVersion", "2.20250401.01.00")
-                        put("hl", localeHl)
-                        put("gl", localeGl)
-                        if (visitorData.isNotBlank()) put("visitorData", visitorData)
+            val cleanAuthUser = authUser.filter(Char::isDigit).ifBlank { "0" }
+            suspend fun callAccountsList(host: String, clientName: String, clientVersion: String): List<YtMusicAccountProfile> {
+                val origin = "https://$host"
+                val auth = SapisidAuthSigner.buildAuthHeader(cookie, origin = origin) ?: return emptyList()
+                val payload = buildJsonObject {
+                    putJsonObject("context") {
+                        putJsonObject("client") {
+                            put("clientName", clientName)
+                            put("clientVersion", clientVersion)
+                            put("hl", localeHl)
+                            put("gl", localeGl)
+                            if (visitorData.isNotBlank()) put("visitorData", visitorData)
+                        }
                     }
                 }
-                put("accountReadMask", buildJsonObject {
-                    put("returnOwner", true)
-                    put("returnBrandAccounts", true)
-                })
+                val respText = http.post("$origin/youtubei/v1/account/accounts_list?prettyPrint=false") {
+                    contentType(ContentType.Application.Json)
+                    header("Origin", origin)
+                    header("Referer", "$origin/")
+                    header("X-Origin", origin)
+                    header("Authorization", auth)
+                    header("Cookie", cookie)
+                    header("X-Goog-AuthUser", cleanAuthUser)
+                    if (visitorData.isNotBlank()) header("X-Goog-Visitor-Id", visitorData)
+                    header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
+                    setBody(payload.toString())
+                }.bodyAsText()
+                val root = json.parseToJsonElement(respText).jsonObject
+                return parseAccountsListTree(root, cleanAuthUser)
             }
-            val respText = http.post("https://www.youtube.com/youtubei/v1/account/accounts_list?prettyPrint=false") {
-                contentType(ContentType.Application.Json)
-                header("Origin", "https://www.youtube.com")
-                header("Referer", "https://www.youtube.com/")
-                header("X-Origin", "https://www.youtube.com")
-                header("Authorization", auth)
-                header("Cookie", cookie)
-                header("X-Goog-AuthUser", authUser.filter(Char::isDigit).ifBlank { "0" })
-                if (visitorData.isNotBlank()) header("X-Goog-Visitor-Id", visitorData)
-                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
-                setBody(payload.toString())
-            }.bodyAsText()
-            val root = json.parseToJsonElement(respText).jsonObject
-            val parsed = mutableListOf<YtMusicAccountProfile>()
-            val items = findAllObjectsByKey(root, "accountItem") + findAllObjectsByKey(root, "accountItemRenderer")
-            items.forEach { item ->
-                val name = item["accountName"]?.let(::extractColumnText).orEmpty().ifBlank {
-                    item["channelHandle"]?.let(::extractColumnText).orEmpty()
-                }
-                if (name.isBlank()) return@forEach
-                val handle = item["channelHandle"]?.let(::extractColumnText).orEmpty()
-                val byline = item["accountByline"]?.let(::extractColumnText).orEmpty()
-                val rawPhoto = extractBestThumbnail(item["accountPhoto"])
-                val avatar = if (rawPhoto.isNotBlank()) {
-                    rawPhoto.replace(Regex("=s\\d+"), "=s256").replace(Regex("=w\\d+-h\\d+"), "=w256-h256")
-                } else ""
-                val isSel = item["isSelected"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
-                val selectEp = findFirstObjectByKey(item, "selectActiveIdentityEndpoint")
-                val tokens = selectEp?.get("supportedTokens")?.jsonArray.orEmpty()
-                var pageId = ""
-                var dsId = ""
-                tokens.forEach { tok ->
-                    val obj = tok as? JsonObject ?: return@forEach
-                    obj["pageIdToken"]?.jsonObject?.get("pageId")?.jsonPrimitive?.contentOrNull?.let { if (it.isNotBlank()) pageId = it }
-                    obj["datasyncIdToken"]?.jsonObject?.get("datasyncIdToken")?.jsonPrimitive?.contentOrNull?.let { if (it.isNotBlank()) dsId = it }
-                }
-                parsed += YtMusicAccountProfile(
-                    name = name,
-                    channelHandle = handle,
-                    byline = byline,
-                    avatarUrl = avatar,
-                    pageId = pageId,
-                    dataSyncId = dsId.substringBefore("||").trim(),
-                    authUser = authUser.filter(Char::isDigit).ifBlank { "0" },
-                    isSelected = isSel,
-                )
-            }
-            parsed.distinctBy { it.profileKey }
+
+            val fromWeb = runCatching { callAccountsList("www.youtube.com", "WEB", "2.20250401.01.00") }.getOrElse { emptyList() }
+            if (fromWeb.size > 1) return@runCatching fromWeb
+            val fromMusic = runCatching { callAccountsList("music.youtube.com", "WEB_REMIX", "1.20250401.01.00") }.getOrElse { emptyList() }
+            (fromWeb + fromMusic).distinctBy { it.profileKey }
         }
+    }
+
+    private fun parseAccountsListTree(root: JsonObject, authUser: String): List<YtMusicAccountProfile> {
+        val parsed = mutableListOf<YtMusicAccountProfile>()
+        val items = findAllObjectsByKey(root, "accountItem") + findAllObjectsByKey(root, "accountItemRenderer")
+        items.forEach { item ->
+            val name = item["accountName"]?.let(::extractColumnText).orEmpty().ifBlank {
+                item["channelHandle"]?.let(::extractColumnText).orEmpty()
+            }.ifBlank {
+                item["accountByline"]?.let(::extractColumnText).orEmpty()
+            }
+            if (name.isBlank()) return@forEach
+            val handle = item["channelHandle"]?.let(::extractColumnText).orEmpty()
+            val byline = item["accountByline"]?.let(::extractColumnText).orEmpty()
+            val rawPhoto = extractBestThumbnail(item["accountPhoto"])
+            val avatar = if (rawPhoto.isNotBlank()) {
+                rawPhoto.replace(Regex("=s\\d+"), "=s256").replace(Regex("=w\\d+-h\\d+"), "=w256-h256")
+            } else ""
+            val isSel = item["isSelected"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
+            val selectEp = findFirstObjectByKey(item, "selectActiveIdentityEndpoint")
+            val tokens = selectEp?.get("supportedTokens")?.jsonArray.orEmpty()
+            var pageId = ""
+            var dsId = ""
+            var signinUrl = ""
+            tokens.forEach { tok ->
+                val obj = tok as? JsonObject ?: return@forEach
+                obj["pageIdToken"]?.jsonObject?.get("pageId")?.jsonPrimitive?.contentOrNull?.let { if (it.isNotBlank()) pageId = it }
+                obj["datasyncIdToken"]?.jsonObject?.get("datasyncIdToken")?.jsonPrimitive?.contentOrNull?.let { if (it.isNotBlank()) dsId = it }
+                obj["accountSigninToken"]?.jsonObject?.get("signinUrl")?.jsonPrimitive?.contentOrNull?.let { if (it.isNotBlank()) signinUrl = it }
+            }
+            val resolvedPageId = pageId.ifBlank {
+                val parts = dsId.split("||").map(String::trim).filter(String::isNotBlank)
+                if (parts.size >= 2) parts[0] else ""
+            }
+            val parsedAuthUser = Regex("""[?&]authuser=(\d+)""").find(signinUrl)?.groupValues?.get(1) ?: authUser
+            parsed += YtMusicAccountProfile(
+                name = name,
+                channelHandle = handle,
+                byline = byline,
+                avatarUrl = avatar,
+                pageId = resolvedPageId,
+                dataSyncId = dsId.substringBefore("||").trim(),
+                signinUrl = signinUrl,
+                authUser = parsedAuthUser,
+                isSelected = isSel,
+            )
+        }
+        return parsed.distinctBy { it.profileKey }
     }
 
     /**
@@ -771,10 +790,10 @@ class InnerTubeClient(
     }
 
     /**
-     * Deep extensive radio queue builder: chains up to 2 continuation pages so the playback
-     * queue immediately offers 50-70+ related tracks instead of a tiny 20-track list.
+     * Deep extensive radio queue builder: chains up to 4 continuation pages so a single seed
+     * immediately produces 70-95+ unique tracks!
      */
-    suspend fun fetchRadioQueue(videoId: String, limit: Int = 60): List<Track> = withContext(Dispatchers.IO) {
+    suspend fun fetchRadioQueue(videoId: String, limit: Int = 85): List<Track> = withContext(Dispatchers.IO) {
         runCatching {
             val playlistId = "RDAMVM$videoId"
             val payload = buildWebRemixContext {
@@ -788,7 +807,7 @@ class InnerTubeClient(
             val seenTokens = mutableSetOf<String>()
 
             var page = 0
-            while (collected.distinctBy { it.id }.size < limit && page < 2) {
+            while (collected.distinctBy { it.id }.size < limit && page < 4) {
                 val token = findFirstContinuationToken(root) ?: break
                 if (!seenTokens.add(token)) break
                 val contPayload = buildWebRemixContext {

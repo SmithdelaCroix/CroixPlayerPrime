@@ -169,4 +169,37 @@ class EngineUnitTests {
         assertEquals("Midnight City", recs.first().title)
         assertEquals("M83", recs.first().artist)
     }
+
+    @Test
+    fun `anti-noise music candidate filter rejects spam edits and keeps real songs`() {
+        assertTrue(HybridAlgorithmEngine.isCleanMusicCandidate(Track("s1", "Starboy", "The Weeknd", durationSeconds = 230)))
+        assertFalse(HybridAlgorithmEngine.isCleanMusicCandidate(Track("s2", "Starboy (Slowed + Reverb)", "Editz", durationSeconds = 260)))
+        assertFalse(HybridAlgorithmEngine.isCleanMusicCandidate(Track("s3", "Starboy Karaoke Instrumental", "Karafun", durationSeconds = 230)))
+        assertFalse(HybridAlgorithmEngine.isCleanMusicCandidate(Track("s4", "Starboy 8D Audio", "8D Tunes", durationSeconds = 230)))
+        assertFalse(HybridAlgorithmEngine.isCleanMusicCandidate(Track("s5", "Best Pop Mix 1 Hour Compilation", "Mixes", durationSeconds = 3600)))
+        assertFalse(HybridAlgorithmEngine.isCleanMusicCandidate(Track("s6", "Tiny Intro", "Artist", durationSeconds = 25)))
+        // Explicitly allowed when user searches/plays a slowed/remix seed
+        assertTrue(HybridAlgorithmEngine.isCleanMusicCandidate(Track("s2", "Starboy (Slowed + Reverb)", "Editz", durationSeconds = 260), allowNoise = true))
+    }
+
+    @Test
+    fun `artist de-clumping spaces out repeated artists Spotify style`() {
+        val input = listOf(
+            Track("1", "Song 1", "The Weeknd"),
+            Track("2", "Song 2", "The Weeknd"),
+            Track("3", "Song 3", "The Weeknd"),
+            Track("4", "Song 4", "Daft Punk"),
+            Track("5", "Song 5", "Dua Lipa"),
+            Track("6", "Song 6", "Tame Impala"),
+        )
+        val spaced = HybridAlgorithmEngine.interleaveWithArtistSpacing(input, minGap = 2)
+        assertEquals(input.size, spaced.size)
+        for (i in 1 until spaced.size) {
+            assertFalse(
+                "Same artist should not play back-to-back at index $i",
+                HybridAlgorithmEngine.normalizeArtistKey(spaced[i].artist) ==
+                    HybridAlgorithmEngine.normalizeArtistKey(spaced[i - 1].artist),
+            )
+        }
+    }
 }

@@ -214,13 +214,22 @@ fun SpotifyLoginOverlay(
     }
 }
 
+enum class YtMusicAuthFlowMode {
+    SIGN_IN,
+    ADD_ACCOUNT,
+    SWITCH_CHANNEL,
+}
+
+private const val YTMUSIC_ADD_ACCOUNT_URL =
+    "https://accounts.google.com/AddSession?ltmpl=music&service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F"
+
 private class CroixYtAuthBridge(
     private val onTokens: (visitorData: String, dataSyncId: String, authUser: String) -> Unit,
 ) {
     @JavascriptInterface
     fun onAuthMeta(visitorData: String?, dataSyncId: String?, authUser: String?) {
-        val v = visitorData?.takeUnless { it == "null" || it == "undefined" }.orEmpty()
-        val d = dataSyncId?.takeUnless { it == "null" || it == "undefined" }.orEmpty().substringBefore("||").trim()
+        val v = visitorData?.takeUnless { it == "null" || it == "undefined" }.orEmpty().trim()
+        val d = dataSyncId?.takeUnless { it == "null" || it == "undefined" }.orEmpty().trim()
         val a = authUser?.takeUnless { it == "null" || it == "undefined" }.orEmpty().filter(Char::isDigit).ifBlank { "0" }
         onTokens(v, d, a)
     }
@@ -229,7 +238,9 @@ private class CroixYtAuthBridge(
 @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility", "JavascriptInterface")
 @Composable
 fun YtMusicLoginOverlay(
-    isAddingAnotherAccount: Boolean = false,
+    mode: YtMusicAuthFlowMode = YtMusicAuthFlowMode.SIGN_IN,
+    existingCookie: String = "",
+    targetSigninUrl: String = "",
     onDismiss: () -> Unit,
     onAuthCaptured: (cookie: String, visitorData: String, dataSyncId: String, authUser: String) -> Unit,
 ) {
@@ -237,11 +248,43 @@ fun YtMusicLoginOverlay(
     val strings = LocalCroixStrings.current
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var captured by remember { mutableStateOf(false) }
+    var onYtMusicDomain by remember { mutableStateOf(false) }
     var manualCookie by remember { mutableStateOf("") }
     var latestVisitor by remember { mutableStateOf("") }
     var latestDataSyncId by remember { mutableStateOf("") }
     var latestAuthUser by remember { mutableStateOf("0") }
     val blocker = remember { MutableInteractionSource() }
+
+    fun collectAndFinish(view: WebView?) {
+        if (captured) return
+        val cm = CookieManager.getInstance()
+        view?.let { v ->
+            runCatching {
+                v.evaluateJavascript(
+                    "(function(){var c=(window.yt&&window.yt.config_)||{};CroixAuth.onAuthMeta(c.VISITOR_DATA||'',c.DATASYNC_ID||'',String(c.SESSION_INDEX||'0'));})();",
+                    null,
+                )
+            }
+        }
+        cm.flush()
+        val rawMusic = cm.getCookie("https://music.youtube.com").orEmpty()
+        val rawYt = cm.getCookie("https://www.youtube.com").orEmpty()
+        val merged = listOf(rawMusic, rawYt)
+            .flatMap { it.split(";") }
+            .map { it.trim() }
+            .filter { it.contains("=") }
+            .distinctBy { it.substringBefore("=") }
+            .joinToString("; ")
+        if (merged.contains("SAPISID=") || merged.contains("__Secure-3PAPISID=")) {
+            val trigger = {
+                if (!captured) {
+                    captured = true
+                    onAuthCaptured(merged, latestVisitor, latestDataSyncId, latestAuthUser)
+                }
+            }
+            if (view != null) view.postDelayed(trigger, 480L) else trigger()
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -268,50 +311,68 @@ fun YtMusicLoginOverlay(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             CroixGlassCard(cornerRadius = 50.dp, onClick = onDismiss) {
                 IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = strings.close, tint = Color.White)
                 }
             }
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    if (isAddingAnotherAccount) "Añadir otra cuenta" else strings.connectYtMusic,
+                    text = when (mode) {
+                        YtMusicAuthFlowMode.ADD_ACCOUNT -> if (strings.isSpanish) "Cambiar / Añadir cuenta" else "Add / Switch Account"
+                        YtMusicAuthFlowMode.SWITCH_CHANNEL -> if (strings.isSpanish) "Cambiar perfil / canal" else "Switch Channel / Profile"
+                        YtMusicAuthFlowMode.SIGN_IN -> strings.connectYtMusic
+                    },
                     style = MaterialTheme.typography.titleLarge,
                     color = Color.White,
                 )
                 Text(
-                    if (strings.isSpanish) "Sincronización automática completa + perfiles y canales" else "Full auto-sync + multi-profile support",
+                    text = when (mode) {
+                        YtMusicAuthFlowMode.SWITCH_CHANNEL ->
+                            if (strings.isSpanish) "Toca tu foto arriba a la derecha → Cambiar cuenta y luego pulsa «Listo»"
+                            else "Tap your avatar → Switch account, then tap Done"
+                        else ->
+                            if (strings.isSpanish) "Sincronización automática completa + perfiles y canales"
+                            else "Full auto-sync + multi-profile support"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = palette.textSecondary,
                 )
             }
+            if (onYtMusicDomain || mode == YtMusicAuthFlowMode.SWITCH_CHANNEL) {
+                Button(onClick = { collectAndFinish(webViewRef) }) {
+                    Text(if (strings.isSpanish) "Listo" else "Done")
+                }
+            }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                value = manualCookie,
-                onValueChange = { manualCookie = it },
-                placeholder = { Text("Cookie YT Music con SAPISID (opcional)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            Button(
-                enabled = manualCookie.contains("SAPISID"),
-                onClick = {
-                    if (!captured && manualCookie.isNotBlank()) {
-                        captured = true
-                        onAuthCaptured(manualCookie.trim(), "", "", "0")
-                    }
-                },
-            ) { Text("OK") }
+        if (mode != YtMusicAuthFlowMode.SWITCH_CHANNEL) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = manualCookie,
+                    onValueChange = { manualCookie = it },
+                    placeholder = { Text("Cookie YT Music con SAPISID (opcional)") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    enabled = manualCookie.contains("SAPISID"),
+                    onClick = {
+                        if (!captured && manualCookie.isNotBlank()) {
+                            captured = true
+                            onAuthCaptured(manualCookie.trim(), "", "", "0")
+                        }
+                    },
+                ) { Text("OK") }
+            }
         }
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -320,8 +381,21 @@ fun YtMusicLoginOverlay(
                 factory = { ctx ->
                     val cm = CookieManager.getInstance()
                     cm.setAcceptCookie(true)
-                    cm.removeAllCookies(null)
-                    cm.flush()
+
+                    if (mode == YtMusicAuthFlowMode.SWITCH_CHANNEL) {
+                        // Preserve & inject active account cookies so user can pick their Brand Channel directly!
+                        if (existingCookie.isNotBlank()) {
+                            existingCookie.split(";").map(String::trim).filter { it.contains("=") }.forEach { pair ->
+                                cm.setCookie("https://music.youtube.com", pair)
+                                cm.setCookie("https://www.youtube.com", pair)
+                            }
+                            cm.flush()
+                        }
+                    } else {
+                        // Clear WebView cookies so Google shows a clean account chooser (works for ADD_ACCOUNT & SIGN_IN!)
+                        cm.removeAllCookies(null)
+                        cm.flush()
+                    }
 
                     val bridge = CroixYtAuthBridge { v, d, a ->
                         if (v.isNotBlank()) latestVisitor = v
@@ -329,46 +403,44 @@ fun YtMusicLoginOverlay(
                         if (a.isNotBlank()) latestAuthUser = a
                     }
 
+                    val startUrl = when {
+                        targetSigninUrl.isNotBlank() -> {
+                            when {
+                                targetSigninUrl.startsWith("http") -> targetSigninUrl
+                                targetSigninUrl.startsWith("/") -> "https://music.youtube.com$targetSigninUrl"
+                                else -> "https://music.youtube.com/$targetSigninUrl"
+                            }
+                        }
+                        mode == YtMusicAuthFlowMode.SWITCH_CHANNEL -> "https://music.youtube.com/"
+                        mode == YtMusicAuthFlowMode.ADD_ACCOUNT -> YTMUSIC_ADD_ACCOUNT_URL
+                        else -> YTMUSIC_LOGIN_URL
+                    }
+
                     WebView(ctx).apply {
                         configureAuthWebView(cm)
                         addJavascriptInterface(bridge, "CroixAuth")
                         webViewClient = object : WebViewClient() {
-                            private fun extractAndCapture(view: WebView, url: String?) {
-                                if (captured) return
-                                if (url?.contains("music.youtube.com") != true && url?.contains("youtube.com") != true) return
-                                // Extract Metrolist-style VISITOR_DATA, DATASYNC_ID, SESSION_INDEX from page config
-                                runCatching {
-                                    view.evaluateJavascript(
-                                        "(function(){var c=(window.yt&&window.yt.config_)||{};CroixAuth.onAuthMeta(c.VISITOR_DATA||'',c.DATASYNC_ID||'',String(c.SESSION_INDEX||'0'));})();",
-                                        null,
-                                    )
-                                }
-                                cm.flush()
-                                val rawMusic = cm.getCookie("https://music.youtube.com").orEmpty()
-                                val rawYt = cm.getCookie("https://www.youtube.com").orEmpty()
-                                val merged = listOf(rawMusic, rawYt)
-                                    .flatMap { it.split(";") }
-                                    .map { it.trim() }
-                                    .filter { it.contains("=") }
-                                    .distinctBy { it.substringBefore("=") }
-                                    .joinToString("; ")
-                                if (merged.contains("SAPISID=") || merged.contains("__Secure-3PAPISID=")) {
-                                    view.postDelayed({
-                                        if (!captured) {
-                                            captured = true
-                                            onAuthCaptured(merged, latestVisitor, latestDataSyncId, latestAuthUser)
-                                        }
-                                    }, 450L)
-                                }
-                            }
-
                             override fun onPageFinished(view: WebView, url: String?) {
-                                extractAndCapture(view, url)
+                                val isMusic = url?.contains("music.youtube.com") == true
+                                if (isMusic) {
+                                    onYtMusicDomain = true
+                                    runCatching {
+                                        view.evaluateJavascript(
+                                            "(function(){var c=(window.yt&&window.yt.config_)||{};CroixAuth.onAuthMeta(c.VISITOR_DATA||'',c.DATASYNC_ID||'',String(c.SESSION_INDEX||'0'));})();",
+                                            null,
+                                        )
+                                    }
+                                    // Auto-complete on SIGN_IN / ADD_ACCOUNT or targeted signinUrl redirect;
+                                    // on manual SWITCH_CHANNEL let the user pick their profile and press "Listo"!
+                                    if (mode != YtMusicAuthFlowMode.SWITCH_CHANNEL || targetSigninUrl.isNotBlank()) {
+                                        collectAndFinish(view)
+                                    }
+                                }
                             }
                         }
                         webChromeClient = WebChromeClient()
                         webViewRef = this
-                        loadUrl(YTMUSIC_LOGIN_URL)
+                        loadUrl(startUrl)
                     }
                 },
                 update = { webViewRef = it },

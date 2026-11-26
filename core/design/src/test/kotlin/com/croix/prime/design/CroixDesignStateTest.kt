@@ -68,11 +68,15 @@ class CroixDesignStateTest {
     }
 
     @Test
-    fun `presets and color swatches contain curated v5 entries`() {
+    fun `presets and color swatches contain curated v5 entries and beta features default off`() {
         assertEquals(12, PrimePresets.All.size)
         assertEquals(16, PrimeColorSwatches.All.size)
         assertTrue(PrimePresets.All.map { it.presetName }.distinct().size == PrimePresets.All.size)
         assertTrue(PrimeColorSwatches.All.any { it.isDynamicAlbum })
+        val defaults = CroixDesignState()
+        assertEquals(false, defaults.artworkParallax3d)
+        assertEquals(false, defaults.betaBlindDiscoveryEnabled)
+        assertEquals(false, defaults.betaKaraokeEnabled)
     }
 
     @Test

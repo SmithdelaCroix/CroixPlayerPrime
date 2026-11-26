@@ -4,13 +4,19 @@
 
 package com.croix.player.prime.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -20,6 +26,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,17 +51,20 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -74,6 +84,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -368,9 +379,30 @@ fun FavoritesScreen(
     var newPlaylistName by remember { mutableStateOf("") }
     var showImportUrl by remember { mutableStateOf(false) }
     var importUrlInput by remember { mutableStateOf("") }
+    var favFilterQuery by remember { mutableStateOf("") }
+    var favSortMode by remember { mutableIntStateOf(0) } // 0=Recientes, 1=A-Z, 2=Artista
+    var favGridView by remember { mutableStateOf(true) } // Dynamic 2-column visual cover grid by default!
 
     val favIds = remember(favorites) { favorites.map { it.id }.toSet() }
     val downloadedIds = remember(downloads) { downloads.map { it.id }.toSet() }
+    val heroCovers = remember(favorites, historyEntities) {
+        val fromFavs = favorites.mapNotNull { it.thumbnailUrl.takeIf(String::isNotBlank) }.distinct().take(4)
+        if (fromFavs.isNotEmpty()) fromFavs
+        else historyEntities.mapNotNull { it.thumbnailUrl.takeIf(String::isNotBlank) }.distinct().take(4)
+    }
+
+    val filteredFavorites = remember(favorites, favFilterQuery, favSortMode) {
+        val q = favFilterQuery.trim()
+        val base = if (q.isBlank()) favorites else favorites.filter {
+            it.title.contains(q, ignoreCase = true) || it.artist.contains(q, ignoreCase = true)
+        }
+        when (favSortMode) {
+            1 -> base.sortedBy { it.title.lowercase() }
+            2 -> base.sortedBy { it.artist.lowercase() }
+            else -> base
+        }
+    }
+
     val tabLabels = listOf(
         "${strings.tabLiked} (${favorites.size})",
         "${strings.tabPlaylists} (${playlists.size})",
@@ -382,18 +414,135 @@ fun FavoritesScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 18.dp, end = 18.dp, top = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(start = 18.dp, end = 18.dp, top = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(strings.favoritesTitle, style = MaterialTheme.typography.headlineLarge, color = Color.White)
-            CroixGlassCard(cornerRadius = 50.dp, onClick = onOpenSettings) {
-                IconButton(onClick = onOpenSettings, modifier = Modifier.size(42.dp)) {
-                    Icon(Icons.Rounded.Settings, contentDescription = strings.settingsTitle, tint = Color.White)
+            Column {
+                Text(strings.favoritesTitle, style = MaterialTheme.typography.headlineLarge, color = Color.White)
+                Text(
+                    if (es) "${favorites.size} Me gusta • ${playlists.size} playlists • ${downloads.size} offline"
+                    else "${favorites.size} likes • ${playlists.size} playlists • ${downloads.size} offline",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (selectedTab == 0) {
+                    CroixGlassCard(
+                        cornerRadius = 50.dp,
+                        accentTint = if (favGridView) palette.primary else null,
+                        onClick = { favGridView = !favGridView },
+                    ) {
+                        IconButton(onClick = { favGridView = !favGridView }, modifier = Modifier.size(42.dp)) {
+                            Icon(
+                                if (favGridView) Icons.Rounded.ViewAgenda else Icons.Rounded.GridView,
+                                contentDescription = "Cambiar vista",
+                                tint = Color.White,
+                            )
+                        }
+                    }
+                }
+                CroixGlassCard(cornerRadius = 50.dp, onClick = onOpenSettings) {
+                    IconButton(onClick = onOpenSettings, modifier = Modifier.size(42.dp)) {
+                        Icon(Icons.Rounded.Settings, contentDescription = strings.settingsTitle, tint = Color.White)
+                    }
+                }
+            }
+        }
+
+        // Dynamic Gaussian-Blurred 2x2 Mosaic Hero Card (visible on Likes & Playlists tabs)
+        if (selectedTab == 0 && favorites.isNotEmpty() && selectedPlaylistId == null) {
+            CroixGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 24.dp,
+                accentTint = palette.primary,
+            ) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    heroCovers.firstOrNull()?.let { bgCover ->
+                        AsyncImage(
+                            model = bgCover,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .matchParentSize()
+                                .blur(28.dp),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color.Black.copy(alpha = 0.50f),
+                                        palette.background.copy(alpha = 0.80f),
+                                    ),
+                                ),
+                            ),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        CoverMosaicBox(
+                            covers = heroCovers,
+                            modifier = Modifier.size(86.dp),
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column {
+                                Text(
+                                    text = if (es) "Tu Colección Viva" else "Your Live Collection",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                )
+                                Text(
+                                    text = if (es) "${favorites.size} canciones favoritas listas" else "${favorites.size} favorite tracks ready",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.82f),
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50.dp))
+                                        .background(Brush.linearGradient(listOf(palette.primary, palette.secondary)))
+                                        .clickable { onPlayTrack(favorites.first(), favorites) }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                        Text(if (es) "Reproducir" else "Play", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50.dp))
+                                        .background(Color.White.copy(alpha = 0.16f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(50.dp))
+                                        .clickable {
+                                            val sh = favorites.shuffled()
+                                            onPlayTrack(sh.first(), sh)
+                                        }
+                                        .padding(horizontal = 13.dp, vertical = 8.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Icon(Icons.Rounded.Shuffle, null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                        Text(strings.shuffle, color = Color.White, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -415,7 +564,7 @@ fun FavoritesScreen(
                         text = label,
                         style = MaterialTheme.typography.labelMedium,
                         color = Color.White,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = 15.dp, vertical = 9.dp),
                     )
                 }
             }
@@ -432,181 +581,316 @@ fun FavoritesScreen(
             }
         }
 
-        when (selectedTab) {
-            0 -> TrackListSection(
-                tracks = favorites,
-                emptyText = if (es) "Toca el corazón en cualquier canción para guardarla aquí." else "Tap the heart on any track to save it here.",
-                favIds = favIds,
-                downloadedIds = downloadedIds,
-                downloadProgress = downloadProgress,
-                bottomPaddingDp = bottomPaddingDp,
-                onPlayTrack = onPlayTrack,
-                onToggleFavorite = onToggleFavorite,
-                onOpenTrackMenu = onOpenTrackMenu,
-            )
-
-            1 -> {
-                val openPlaylist = playlists.firstOrNull { it.playlistId == selectedPlaylistId }
-                if (openPlaylist != null) {
-                    val pTracks = playlistTracks[openPlaylist.playlistId].orEmpty()
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(openPlaylist.name, style = MaterialTheme.typography.titleLarge, color = Color.White)
-                        TextButton(onClick = { selectedPlaylistId = null }) { Text(strings.tabPlaylists) }
-                    }
-                    TrackListSection(
-                        tracks = pTracks,
-                        emptyText = if (es) "Añade canciones desde el menú ⋮." else "Add tracks using the ⋮ menu.",
-                        favIds = favIds,
-                        downloadedIds = downloadedIds,
-                        downloadProgress = downloadProgress,
-                        bottomPaddingDp = bottomPaddingDp,
-                        onPlayTrack = onPlayTrack,
-                        onToggleFavorite = onToggleFavorite,
-                        onOpenTrackMenu = onOpenTrackMenu,
-                    )
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        CroixGlassCard(
-                            modifier = Modifier.weight(1f),
-                            accentTint = palette.primary,
-                            onClick = {
-                                newPlaylistName = ""
-                                showCreatePlaylist = true
-                            },
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                            ) {
-                                Icon(Icons.Rounded.Add, null, tint = Color.White)
-                                Spacer(Modifier.width(6.dp))
-                                Text(strings.createPlaylist, color = Color.White, fontWeight = FontWeight.Bold)
+        AnimatedContent(
+            targetState = selectedTab,
+            transitionSpec = {
+                fadeIn(tween(220, easing = FastOutSlowInEasing)).togetherWith(fadeOut(tween(150)))
+            },
+            label = "favorites_dynamic_tab",
+            modifier = Modifier.weight(1f),
+        ) { tab ->
+            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (tab) {
+                    0 -> {
+                        if (favorites.isEmpty()) {
+                            CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    if (es) "Toca el corazón en cualquier canción para guardarla aquí o sincroniza tu cuenta de YouTube Music." else "Tap the heart on any track to save it here.",
+                                    color = palette.textSecondary,
+                                    modifier = Modifier.padding(18.dp),
+                                )
                             }
-                        }
-                        CroixGlassCard(
-                            modifier = Modifier.weight(1f),
-                            accentTint = palette.secondary,
-                            onClick = {
-                                importUrlInput = ""
-                                showImportUrl = true
-                            },
-                        ) {
+                        } else {
+                            // Inline instant search + sort pills!
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                            ) {
-                                Icon(Icons.Rounded.Link, null, tint = Color.White)
-                                Spacer(Modifier.width(6.dp))
-                                Text(strings.importPlaylistUrl, color = Color.White, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    LazyColumn(
-                        contentPadding = PaddingValues(bottom = bottomPaddingDp.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        items(playlists, key = { it.playlistId }) { pl ->
-                            val count = playlistTracks[pl.playlistId]?.size ?: 0
-                            CroixGlassCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                onClick = { selectedPlaylistId = pl.playlistId },
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Column {
-                                        Text(pl.name, color = Color.White, fontWeight = FontWeight.Bold)
-                                        Text("$count ${strings.filterSongs.lowercase()}", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                CroixGlassCard(modifier = Modifier.weight(1f), cornerRadius = 14.dp) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(Icons.Rounded.Search, null, tint = palette.textSecondary, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            if (favFilterQuery.isEmpty()) {
+                                                Text(if (es) "Filtrar favoritos..." else "Filter likes...", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            BasicTextField(
+                                                value = favFilterQuery,
+                                                onValueChange = { favFilterQuery = it },
+                                                singleLine = true,
+                                                textStyle = MaterialTheme.typography.bodySmall.copy(color = Color.White),
+                                                cursorBrush = SolidColor(palette.primary),
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                        if (favFilterQuery.isNotEmpty()) {
+                                            Icon(
+                                                Icons.Rounded.Close,
+                                                contentDescription = "Limpiar",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp).clickable { favFilterQuery = "" },
+                                            )
+                                        }
                                     }
-                                    IconButton(onClick = { onDeletePlaylist(pl.playlistId) }) {
-                                        Icon(Icons.Rounded.Delete, contentDescription = "Eliminar", tint = palette.textSecondary)
+                                }
+                                listOf(0 to (if (es) "Recientes" else "Recent"), 1 to "A-Z", 2 to (if (es) "Artista" else "Artist")).forEach { (idx, lbl) ->
+                                    CroixGlassCard(
+                                        cornerRadius = 12.dp,
+                                        accentTint = if (favSortMode == idx) palette.primary else null,
+                                        onClick = { favSortMode = idx },
+                                    ) {
+                                        Text(lbl, color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp))
+                                    }
+                                }
+                            }
+
+                            if (favGridView) {
+                                // Dynamic 2-Column Visual Artwork Grid!
+                                val rows = remember(filteredFavorites) { filteredFavorites.chunked(2) }
+                                LazyColumn(
+                                    contentPadding = PaddingValues(bottom = bottomPaddingDp.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    items(rows.size) { rowIdx ->
+                                        val pair = rows[rowIdx]
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            pair.forEach { track ->
+                                                DynamicFavoriteGridCard(
+                                                    track = track,
+                                                    isDownloaded = track.id in downloadedIds,
+                                                    onPlay = { onPlayTrack(track, filteredFavorites) },
+                                                    onToggleFavorite = { onToggleFavorite(track) },
+                                                    onOpenMenu = { onOpenTrackMenu(track) },
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                            }
+                                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            } else {
+                                LazyColumn(
+                                    contentPadding = PaddingValues(bottom = bottomPaddingDp.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    items(filteredFavorites, key = { it.id }) { track ->
+                                        GlassTrackRow(
+                                            track = track,
+                                            isFavorite = true,
+                                            isDownloaded = track.id in downloadedIds,
+                                            downloadingProgress = downloadProgress[track.id],
+                                            onPlay = { onPlayTrack(track, filteredFavorites) },
+                                            onToggleFavorite = { onToggleFavorite(track) },
+                                            onOpenMenu = { onOpenTrackMenu(track) },
+                                        )
                                     }
                                 }
                             }
                         }
                     }
-                }
-            }
 
-            2 -> {
-                if (downloads.isEmpty()) {
-                    CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            if (es) "Las canciones descargadas suenan sin internet. Abre ⋮ en cualquier canción para descargar." else "Downloaded tracks play offline with zero internet. Open ⋮ on any track to download.",
-                            color = palette.textSecondary,
-                            modifier = Modifier.padding(18.dp),
+                    1 -> {
+                        val openPlaylist = playlists.firstOrNull { it.playlistId == selectedPlaylistId }
+                        if (openPlaylist != null) {
+                            val pTracks = playlistTracks[openPlaylist.playlistId].orEmpty()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(openPlaylist.name, style = MaterialTheme.typography.titleLarge, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { selectedPlaylistId = null }) { Text(if (es) "Volver" else "Back") }
+                            }
+                            TrackListSection(
+                                tracks = pTracks,
+                                emptyText = if (es) "Añade canciones desde el menú ⋮." else "Add tracks using the ⋮ menu.",
+                                favIds = favIds,
+                                downloadedIds = downloadedIds,
+                                downloadProgress = downloadProgress,
+                                bottomPaddingDp = bottomPaddingDp,
+                                onPlayTrack = onPlayTrack,
+                                onToggleFavorite = onToggleFavorite,
+                                onOpenTrackMenu = onOpenTrackMenu,
+                            )
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                CroixGlassCard(
+                                    modifier = Modifier.weight(1f),
+                                    accentTint = palette.primary,
+                                    onClick = {
+                                        newPlaylistName = ""
+                                        showCreatePlaylist = true
+                                    },
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                    ) {
+                                        Icon(Icons.Rounded.Add, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(strings.createPlaylist, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                                    }
+                                }
+                                CroixGlassCard(
+                                    modifier = Modifier.weight(1f),
+                                    accentTint = palette.secondary,
+                                    onClick = {
+                                        importUrlInput = ""
+                                        showImportUrl = true
+                                    },
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                    ) {
+                                        Icon(Icons.Rounded.Link, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(strings.importPlaylistUrl, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                                    }
+                                }
+                            }
+
+                            val plRows = remember(playlists) { playlists.chunked(2) }
+                            LazyColumn(
+                                contentPadding = PaddingValues(bottom = bottomPaddingDp.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(plRows.size) { rowIdx ->
+                                    val pair = plRows[rowIdx]
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        pair.forEach { pl ->
+                                            val tracksInPl = playlistTracks[pl.playlistId].orEmpty()
+                                            val covers = tracksInPl.mapNotNull { it.thumbnailUrl.takeIf(String::isNotBlank) }.distinct().take(4)
+                                            CroixGlassCard(
+                                                modifier = Modifier.weight(1f),
+                                                onClick = { selectedPlaylistId = pl.playlistId },
+                                            ) {
+                                                Column {
+                                                    Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f)) {
+                                                        CoverMosaicBox(covers = covers, modifier = Modifier.fillMaxSize())
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.TopEnd)
+                                                                .padding(6.dp)
+                                                                .size(30.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color.Black.copy(alpha = 0.55f))
+                                                                .clickable { onDeletePlaylist(pl.playlistId) },
+                                                            contentAlignment = Alignment.Center,
+                                                        ) {
+                                                            Icon(Icons.Rounded.Delete, contentDescription = "Eliminar", tint = Color.White, modifier = Modifier.size(16.dp))
+                                                        }
+                                                        if (tracksInPl.isNotEmpty()) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .align(Alignment.BottomEnd)
+                                                                    .padding(8.dp)
+                                                                    .size(36.dp)
+                                                                    .clip(CircleShape)
+                                                                    .background(palette.primary)
+                                                                    .clickable { onPlayTrack(tracksInPl.first(), tracksInPl) },
+                                                                contentAlignment = Alignment.Center,
+                                                            ) {
+                                                                Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                                            }
+                                                        }
+                                                    }
+                                                    Column(modifier = Modifier.padding(10.dp)) {
+                                                        Text(pl.name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                        Text("${tracksInPl.size} temas", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    2 -> {
+                        if (downloads.isEmpty()) {
+                            CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    if (es) "Las canciones descargadas suenan sin internet. Abre ⋮ en cualquier canción para descargar." else "Downloaded tracks play offline with zero internet. Open ⋮ on any track to download.",
+                                    color = palette.textSecondary,
+                                    modifier = Modifier.padding(18.dp),
+                                )
+                            }
+                        } else {
+                            val dlTracks = downloads.map { it.toTrack() }
+                            LazyColumn(
+                                contentPadding = PaddingValues(bottom = bottomPaddingDp.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                items(downloads, key = { it.id }) { item ->
+                                    val mb = "%.1f MB".format(item.fileSizeBytes / (1024f * 1024f))
+                                    CroixGlassCard(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = { onPlayTrack(item.toTrack(), dlTracks) },
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            AsyncImage(
+                                                model = item.thumbnailUrl,
+                                                contentDescription = item.title,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.size(50.dp).clip(RoundedCornerShape(12.dp)),
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(item.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text("${item.artist} • $mb • Offline", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                            }
+                                            IconButton(onClick = { onDeleteDownload(item.id) }) {
+                                                Icon(Icons.Rounded.Delete, contentDescription = "Quitar offline", tint = palette.textSecondary)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    3 -> {
+                        DateGroupedHistorySection(
+                            historyEntities = historyEntities,
+                            favIds = favIds,
+                            downloadedIds = downloadedIds,
+                            downloadProgress = downloadProgress,
+                            bottomPaddingDp = bottomPaddingDp,
+                            isSpanish = es,
+                            onPlayTrack = onPlayTrack,
+                            onToggleFavorite = onToggleFavorite,
+                            onOpenTrackMenu = onOpenTrackMenu,
                         )
                     }
-                } else {
-                    val dlTracks = downloads.map { it.toTrack() }
-                    LazyColumn(
-                        contentPadding = PaddingValues(bottom = bottomPaddingDp.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        items(downloads, key = { it.id }) { item ->
-                            val mb = "%.1f MB".format(item.fileSizeBytes / (1024f * 1024f))
-                            CroixGlassCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = { onPlayTrack(item.toTrack(), dlTracks) },
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    AsyncImage(
-                                        model = item.thumbnailUrl,
-                                        contentDescription = item.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(50.dp).clip(RoundedCornerShape(12.dp)),
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(item.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("${item.artist} • $mb • Offline", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                                    }
-                                    IconButton(onClick = { onDeleteDownload(item.id) }) {
-                                        Icon(Icons.Rounded.Delete, contentDescription = "Quitar offline", tint = palette.textSecondary)
-                                    }
-                                }
-                            }
-                        }
+
+                    4 -> {
+                        ProStatsAndReceiptSection(
+                            stats = stats,
+                            isSpanish = es,
+                            bottomPaddingDp = bottomPaddingDp,
+                            onOpenArtist = onOpenArtist,
+                            onShareReceipt = onShareMusicalReceipt,
+                        )
                     }
                 }
-            }
-
-            // Tab 3: Date-Grouped History ("Hoy / Ayer / Esta semana / Anteriores")
-            3 -> {
-                DateGroupedHistorySection(
-                    historyEntities = historyEntities,
-                    favIds = favIds,
-                    downloadedIds = downloadedIds,
-                    downloadProgress = downloadProgress,
-                    bottomPaddingDp = bottomPaddingDp,
-                    isSpanish = es,
-                    onPlayTrack = onPlayTrack,
-                    onToggleFavorite = onToggleFavorite,
-                    onOpenTrackMenu = onOpenTrackMenu,
-                )
-            }
-
-            // Tab 4: Pro Stats + Hourly/Weekday Bars + Shareable Musical Receipt PNG
-            4 -> {
-                ProStatsAndReceiptSection(
-                    stats = stats,
-                    isSpanish = es,
-                    bottomPaddingDp = bottomPaddingDp,
-                    onOpenArtist = onOpenArtist,
-                    onShareReceipt = onShareMusicalReceipt,
-                )
             }
         }
     }
@@ -658,6 +942,152 @@ fun FavoritesScreen(
             },
             dismissButton = { TextButton(onClick = { showImportUrl = false }) { Text(strings.cancel) } },
         )
+    }
+}
+
+@Composable
+private fun CoverMosaicBox(
+    covers: List<String>,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalCroixPalette.current
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.linearGradient(listOf(palette.primary.copy(alpha = 0.55f), palette.secondary.copy(alpha = 0.45f)))),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            covers.isEmpty() -> {
+                Icon(Icons.Rounded.QueueMusic, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(34.dp))
+            }
+            covers.size < 4 -> {
+                AsyncImage(
+                    model = covers.first(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            else -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        AsyncImage(model = covers[0], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.weight(1f).fillMaxHeight())
+                        AsyncImage(model = covers[1], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.weight(1f).fillMaxHeight())
+                    }
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        AsyncImage(model = covers[2], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.weight(1f).fillMaxHeight())
+                        AsyncImage(model = covers[3], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.weight(1f).fillMaxHeight())
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DynamicFavoriteGridCard(
+    track: Track,
+    isDownloaded: Boolean,
+    onPlay: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onOpenMenu: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val design = LocalCroixDesign.current
+    val palette = LocalCroixPalette.current
+    CroixGlassCard(
+        modifier = modifier,
+        onClick = onPlay,
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f),
+            ) {
+                AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = track.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.08f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Black.copy(alpha = 0.15f), Color.Transparent, Color.Black.copy(alpha = 0.65f)),
+                            ),
+                        ),
+                )
+                Row(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .clickable(onClick = onToggleFavorite),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.Favorite, contentDescription = "Favorito", tint = palette.primary, modifier = Modifier.size(15.dp))
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .clickable(onClick = onOpenMenu),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "Opciones", tint = Color.White, modifier = Modifier.size(15.dp))
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(palette.primary, palette.secondary))),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                if (isDownloaded) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    ) {
+                        Icon(Icons.Rounded.CheckCircle, null, tint = palette.primary, modifier = Modifier.size(13.dp))
+                    }
+                }
+            }
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = if (design.twoLineTrackTitle) 2 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = track.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 

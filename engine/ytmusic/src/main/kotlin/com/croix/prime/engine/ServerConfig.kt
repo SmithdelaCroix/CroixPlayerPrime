@@ -45,6 +45,14 @@ data class ServerConnectionConfig(
     val strictAdBlockEnabled: Boolean = true,
     val ytMusicCookie: String = "",
     val ytMusicAccountName: String = "",
+    val ytMusicAccountEmail: String = "",
+    val ytMusicAccountHandle: String = "",
+    val ytMusicAccountAvatarUrl: String = "",
+    val ytMusicVisitorData: String = "",
+    val ytMusicDataSyncId: String = "",
+    val ytMusicPageId: String = "",
+    val ytMusicAuthUser: String = "0",
+    val ytMusicAutoSync: Boolean = true,
 ) {
     val activeRelayUrl: String
         get() = when (mode) {
@@ -55,6 +63,11 @@ data class ServerConnectionConfig(
 
     val hasYtMusicAccount: Boolean
         get() = ytMusicCookie.contains("SAPISID=") || ytMusicCookie.contains("__Secure-3PAPISID=")
+
+    val effectiveOnBehalfOfUser: String
+        get() = ytMusicPageId.trim().ifBlank {
+            ytMusicDataSyncId.substringBefore("||").trim()
+        }
 }
 
 @Serializable

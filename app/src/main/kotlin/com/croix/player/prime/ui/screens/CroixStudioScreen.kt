@@ -61,16 +61,21 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.QuestionMark
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -95,12 +100,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -108,6 +115,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import com.croix.player.prime.BuildConfig
 import com.croix.player.prime.data.AppIconManager
 import com.croix.player.prime.data.AppUpdateInfo
@@ -144,10 +152,12 @@ import com.croix.prime.design.resolveArtworkShape
 import com.croix.prime.engine.AiApiConfig
 import com.croix.prime.engine.AiProviderMode
 import com.croix.prime.engine.ExternalIntegrationsConfig
+import com.croix.prime.engine.SavedYtMusicAccount
 import com.croix.prime.engine.ServerConnectionConfig
 import com.croix.prime.engine.ServerHealthStatus
 import com.croix.prime.engine.ServerPresets
 import com.croix.prime.engine.SpotifyPlaylistSummary
+import com.croix.prime.engine.YtMusicAccountProfile
 import com.croix.prime.engine.YtMusicPlaylistSummary
 import com.croix.prime.engine.YtMusicServerMode
 import com.croix.prime.playback.AutoEqHeadphoneProfile
@@ -158,6 +168,7 @@ import kotlin.math.roundToInt
 
 private enum class SettingsPage {
     HOME,
+    ACCOUNT,
     SERVERS,
     SPOTIFY,
     AI_INTEGRATION,
@@ -226,7 +237,12 @@ fun SettingsAndStudioOverlay(
     onUpdateServerConfig: ((ServerConnectionConfig) -> ServerConnectionConfig) -> Unit,
     onPingServer: () -> Unit,
     onOpenYtMusicLogin: () -> Unit,
+    onOpenAddYtMusicAccount: () -> Unit,
     onSyncYtMusicNow: () -> Unit,
+    onRefreshYtMusicProfiles: () -> Unit,
+    onSwitchYtMusicProfile: (YtMusicAccountProfile) -> Unit,
+    onSwitchSavedYtAccount: (SavedYtMusicAccount) -> Unit,
+    onRemoveSavedYtAccount: (String) -> Unit,
     onImportYtMusicPlaylist: (YtMusicPlaylistSummary) -> Unit,
     onDisconnectYtMusic: () -> Unit,
     onOpenSpotifyLogin: () -> Unit,
@@ -305,18 +321,19 @@ fun SettingsAndStudioOverlay(
                 Column {
                     val pageTitle = when (page) {
                         SettingsPage.HOME -> if (es) "Configuración" else "Settings"
-                        SettingsPage.SERVERS -> if (es) "Cuenta YT Music y Servidores" else "YT Music Account & Servers"
-                        SettingsPage.SPOTIFY -> if (es) "Algoritmo Spotify" else "Spotify Algorithm"
-                        SettingsPage.AI_INTEGRATION -> if (es) "Integración IA (API)" else "AI Integration (API)"
-                        SettingsPage.INTEGRATIONS -> if (es) "Discord y Scrobbling" else "Discord & Scrobbling"
-                        SettingsPage.PRIVACY_BLOCKED -> if (es) "Privacidad y Bloqueos" else "Privacy & Blocked"
-                        SettingsPage.STUDIO -> if (es) "Estudio de Apariencia" else "Appearance Studio"
-                        SettingsPage.LYRICS_UI -> if (es) "Letras y Visualizador" else "Lyrics & Visualizer"
-                        SettingsPage.AUDIO_ENGINE -> if (es) "Reproductor y Audio" else "Player & Audio"
-                        SettingsPage.EQUALIZER -> if (es) "Karaoke, Audio 8D y AutoEq" else "Karaoke, 8D Audio & AutoEq"
-                        SettingsPage.CACHE_STORAGE -> if (es) "Caché Inteligente de Audio" else "Smart Audio Cache"
+                        SettingsPage.ACCOUNT -> if (es) "Cuenta" else "Account"
+                        SettingsPage.SERVERS -> if (es) "Servidores" else "Servers"
+                        SettingsPage.SPOTIFY -> "Spotify"
+                        SettingsPage.AI_INTEGRATION -> if (es) "Integración IA" else "AI"
+                        SettingsPage.INTEGRATIONS -> if (es) "Conexiones" else "Connections"
+                        SettingsPage.PRIVACY_BLOCKED -> if (es) "Privacidad" else "Privacy"
+                        SettingsPage.STUDIO -> if (es) "Apariencia" else "Appearance"
+                        SettingsPage.LYRICS_UI -> if (es) "Letras" else "Lyrics"
+                        SettingsPage.AUDIO_ENGINE -> if (es) "Reproductor" else "Player"
+                        SettingsPage.EQUALIZER -> if (es) "Ecualizador" else "Equalizer"
+                        SettingsPage.CACHE_STORAGE -> if (es) "Almacenamiento" else "Storage"
                         SettingsPage.BETA_LABS -> if (es) "Funciones BETA" else "BETA Labs"
-                        SettingsPage.GESTURES -> if (es) "Gestos y Hardware" else "Gestures & Hardware"
+                        SettingsPage.GESTURES -> if (es) "Gestos" else "Gestures"
                         SettingsPage.SPONSORBLOCK -> "SponsorBlock"
                         SettingsPage.UPDATES -> if (es) "Actualizaciones" else "Updates"
                         SettingsPage.ABOUT -> if (es) "Acerca de" else "About"
@@ -403,95 +420,178 @@ fun SettingsAndStudioOverlay(
                                 }
                             }
 
-                            // Group 1: Cuenta e Integraciones
+                            // Gaussian-Blurred Account Hero Card at top of Settings!
+                            item {
+                                val cfg = serverState.serverConfig
+                                val avatar = cfg.ytMusicAccountAvatarUrl
+                                CroixGlassCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    cornerRadius = 24.dp,
+                                    accentTint = palette.primary,
+                                    onClick = { page = SettingsPage.ACCOUNT },
+                                ) {
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        // Rich Gaussian Blur Backdrop from user's own avatar!
+                                        if (avatar.isNotBlank()) {
+                                            AsyncImage(
+                                                model = avatar,
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .matchParentSize()
+                                                    .blur(26.dp),
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .matchParentSize()
+                                                    .background(
+                                                        Brush.linearGradient(
+                                                            listOf(
+                                                                palette.primary.copy(alpha = 0.42f),
+                                                                palette.secondary.copy(alpha = 0.28f),
+                                                                Color.Black.copy(alpha = 0.35f),
+                                                            ),
+                                                        ),
+                                                    ),
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .matchParentSize()
+                                                .background(
+                                                    Brush.horizontalGradient(
+                                                        listOf(Color.Black.copy(alpha = 0.52f), Color.Black.copy(alpha = 0.72f)),
+                                                    ),
+                                                ),
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(58.dp)
+                                                    .clip(CircleShape)
+                                                    .background(palette.primary.copy(alpha = 0.28f))
+                                                    .border(2.dp, Color.White.copy(alpha = 0.65f), CircleShape),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                if (avatar.isNotBlank()) {
+                                                    AsyncImage(
+                                                        model = avatar,
+                                                        contentDescription = cfg.ytMusicAccountName,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                    )
+                                                } else {
+                                                    Icon(Icons.Rounded.Person, null, tint = Color.White, modifier = Modifier.size(30.dp))
+                                                }
+                                            }
+                                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                Text(
+                                                    text = if (serverState.isYtMusicConnected) cfg.ytMusicAccountName else (if (es) "Iniciar sesión" else "Sign in"),
+                                                    style = MaterialTheme.typography.titleLarge,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Color.White,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                Text(
+                                                    text = when {
+                                                        serverState.isYtMusicConnected && cfg.ytMusicAccountHandle.isNotBlank() ->
+                                                            "${cfg.ytMusicAccountHandle}${if (serverState.ytMusicBrandProfiles.size > 1) " • ${serverState.ytMusicBrandProfiles.size} perfiles" else ""}"
+                                                        serverState.isYtMusicConnected && cfg.ytMusicAccountEmail.isNotBlank() -> cfg.ytMusicAccountEmail
+                                                        serverState.isYtMusicConnected -> serverState.ytMusicSyncSummary.ifBlank { "Cuenta conectada" }
+                                                        else -> if (es) "Conecta tu cuenta, perfiles y sincronización" else "Connect your account, profiles & sync"
+                                                    },
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = Color.White.copy(alpha = 0.84f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Color.White)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Simplified, crystal-clear Settings Groups
                             item {
                                 SegmentedSettingsGroup(
-                                    header = if (es) "CUENTA E INTEGRACIONES" else "ACCOUNT & INTEGRATIONS",
+                                    header = if (es) "CUENTA Y CONTENIDO" else "ACCOUNT & CONTENT",
                                     items = listOf(
                                         SegmentedEntry(
+                                            icon = Icons.Rounded.Person,
+                                            title = if (es) "Cuenta" else "Account",
+                                            subtitle = if (serverState.isYtMusicConnected) {
+                                                serverState.ytMusicSyncSummary.ifBlank { cfgNameOrSync(serverState) }
+                                            } else {
+                                                if (es) "Iniciar sesión, cambiar cuenta y perfiles" else "Sign in, switch account & profiles"
+                                            },
+                                            accent = palette.primary,
+                                            badge = if (serverState.isYtMusicConnected) "Activa" else null,
+                                            onClick = { page = SettingsPage.ACCOUNT },
+                                        ),
+                                        SegmentedEntry(
+                                            icon = Icons.Rounded.AutoAwesome,
+                                            title = "Spotify",
+                                            subtitle = if (serverState.isSpotifyConnected) {
+                                                "${serverState.spotifyTaste.accountName} • ${(serverState.spotifyBlendWeight * 100).roundToInt()}%"
+                                            } else {
+                                                if (es) "Algoritmo híbrido y playlists" else "Hybrid algorithm & playlists"
+                                            },
+                                            accent = Color(0xFF1DB954),
+                                            badge = if (serverState.isSpotifyConnected) "On" else null,
+                                            onClick = { page = SettingsPage.SPOTIFY },
+                                        ),
+                                        SegmentedEntry(
                                             icon = Icons.Rounded.Dns,
-                                            title = if (es) "Servidores YouTube Music y Ad-Block" else "YouTube Music Servers & Ad-Block",
+                                            title = if (es) "Servidores" else "Servers",
                                             subtitle = buildString {
                                                 append(if (es) serverState.serverConfig.mode.labelEs else serverState.serverConfig.mode.labelEn)
                                                 if (serverHealth?.reachable == true) append(" • ${serverHealth.latencyMs} ms")
-                                                if (serverState.isYtMusicConnected) append(" • ${serverState.serverConfig.ytMusicAccountName}")
                                             },
-                                            accent = palette.primary,
+                                            accent = Color(0xFF00E5FF),
                                             badge = "$adsBlockedCount+ ads",
                                             onClick = { page = SettingsPage.SERVERS },
                                         ),
                                         SegmentedEntry(
-                                            icon = Icons.Rounded.AutoAwesome,
-                                            title = if (es) "Spotify y Algoritmo Híbrido" else "Spotify & Hybrid Algorithm",
-                                            subtitle = if (serverState.isSpotifyConnected) {
-                                                "${serverState.spotifyTaste.accountName} • ${(serverState.spotifyBlendWeight * 100).roundToInt()}% Spotify"
-                                            } else {
-                                                if (es) "Conecta tu Spotify para potenciar recomendaciones" else "Connect Spotify to supercharge recommendations"
-                                            },
-                                            accent = Color(0xFF1DB954),
-                                            badge = if (serverState.isSpotifyConnected) "Activo" else null,
-                                            onClick = { page = SettingsPage.SPOTIFY },
-                                        ),
-                                        SegmentedEntry(
                                             icon = Icons.Rounded.Psychology,
-                                            title = if (es) "Integración IA (Letras y Recomendador)" else "AI Integration (Lyrics & Curator)",
+                                            title = if (es) "Integración IA" else "AI",
                                             subtitle = if (serverState.aiConfig.isReady) {
                                                 "${serverState.aiConfig.provider.label} • ${serverState.aiConfig.effectiveModel}"
                                             } else {
-                                                if (es) "Conecta tu API de Gemini u OpenAI para traducir y recomendar" else "Connect Gemini or OpenAI API for smart lyrics & picks"
+                                                if (es) "Traductor de letras y recomendador" else "Smart lyrics & recommendations"
                                             },
                                             accent = Color(0xFFB388FF),
-                                            badge = if (serverState.aiConfig.isReady) "IA On" else null,
+                                            badge = if (serverState.aiConfig.isReady) "On" else null,
                                             onClick = { page = SettingsPage.AI_INTEGRATION },
-                                        ),
-                                        SegmentedEntry(
-                                            icon = Icons.Rounded.Hub,
-                                            title = if (es) "Discord RPC, Last.fm y ListenBrainz" else "Discord RPC, Last.fm & ListenBrainz",
-                                            subtitle = buildString {
-                                                val active = buildList {
-                                                    if (serverState.integrations.isDiscordReady) add("Discord")
-                                                    if (serverState.integrations.isLastFmReady) add("Last.fm")
-                                                    if (serverState.integrations.isListenBrainzReady) add("ListenBrainz")
-                                                }
-                                                append(if (active.isEmpty()) (if (es) "Muestra lo que escuchas y sincroniza scrobbles" else "Show Rich Presence & sync scrobbles") else active.joinToString(" • "))
-                                            },
-                                            accent = Color(0xFF5865F2),
-                                            badge = if (serverState.integrations.isDiscordReady || serverState.integrations.isLastFmReady || serverState.integrations.isListenBrainzReady) "On" else null,
-                                            onClick = { page = SettingsPage.INTEGRATIONS },
-                                        ),
-                                        SegmentedEntry(
-                                            icon = Icons.Rounded.VisibilityOff,
-                                            title = if (es) "Sesión Privada y Artistas Bloqueados" else "Private Session & Blocked Artists",
-                                            subtitle = if (design.privateSessionEnabled) {
-                                                if (es) "Incógnito ACTIVO • ${blockedArtists.size} artistas bloqueados" else "Incognito ON • ${blockedArtists.size} blocked artists"
-                                            } else {
-                                                if (es) "Pausa historial/scrobbling • ${blockedArtists.size} bloqueados" else "Pause history/scrobbling • ${blockedArtists.size} blocked"
-                                            },
-                                            accent = Color(0xFFCE93D8),
-                                            badge = if (design.privateSessionEnabled) "Incógnito" else null,
-                                            onClick = { page = SettingsPage.PRIVACY_BLOCKED },
                                         ),
                                     ),
                                 )
                             }
 
-                            // Group 2: Interfaz y Personalización
                             item {
                                 SegmentedSettingsGroup(
-                                    header = if (es) "INTERFAZ Y PERSONALIZACIÓN" else "APPEARANCE & PERSONALIZATION",
+                                    header = if (es) "APARIENCIA" else "APPEARANCE",
                                     items = listOf(
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Palette,
-                                            title = if (es) "Estudio de Apariencia Pro" else "Appearance Studio Pro",
-                                            subtitle = if (es) "16 colores, fuentes, formas de carátula, botones, fondos, mini-player y 12 temas" else "16 swatches, fonts, artwork shapes, buttons, backdrops & 12 themes",
+                                            title = if (es) "Apariencia" else "Appearance",
+                                            subtitle = if (es) "Colores, cristal, fuentes, reproductor y temas" else "Colors, glass, fonts, player & themes",
                                             accent = palette.primary,
                                             badge = design.presetName,
                                             onClick = { page = SettingsPage.STUDIO },
                                         ),
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Lyrics,
-                                            title = if (es) "Letras y Visualizador" else "Lyrics & Visualizer",
-                                            subtitle = "${design.lyricsFontSizeSp.roundToInt()} sp • ${design.lyricsAlign.label} • ${design.visualizerStyle.label}",
+                                            title = if (es) "Letras" else "Lyrics",
+                                            subtitle = "${design.lyricsFontSizeSp.roundToInt()} sp • ${design.lyricsAnimStyle.label}",
                                             accent = palette.secondary,
                                             onClick = { page = SettingsPage.LYRICS_UI },
                                         ),
@@ -499,40 +599,34 @@ fun SettingsAndStudioOverlay(
                                 )
                             }
 
-                            // Group 3: Reproducción y Audio
                             item {
                                 SegmentedSettingsGroup(
-                                    header = if (es) "REPRODUCCIÓN Y AUDIO" else "PLAYBACK & AUDIO",
+                                    header = if (es) "REPRODUCTOR Y AUDIO" else "PLAYER & AUDIO",
                                     items = listOf(
                                         SegmentedEntry(
                                             icon = Icons.Rounded.PlayArrow,
-                                            title = if (es) "Reproductor y Motor de Audio" else "Player & Audio Engine",
-                                            subtitle = "${if (es) design.audioQuality.labelEs else design.audioQuality.labelEn} • ${"%.2f".format(playback.playbackSpeed)}x • Crossfade ${if (design.crossfadeSeconds == 0) "Off" else "${design.crossfadeSeconds}s"}",
+                                            title = if (es) "Reproductor" else "Player",
+                                            subtitle = "${if (es) design.audioQuality.labelEs else design.audioQuality.labelEn} • ${"%.2f".format(playback.playbackSpeed)}x",
                                             accent = palette.primary,
                                             onClick = { page = SettingsPage.AUDIO_ENGINE },
                                         ),
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Equalizer,
-                                            title = if (es) "Audio 8D, Reverb, AutoEq y Salida" else "8D Audio, Reverb, AutoEq & Output",
-                                            subtitle = buildString {
-                                                append(if (playback.audio8dEnabled) "8D Activo" else "8D Off")
-                                                append(" • ${playback.reverbMode.label}")
-                                                append(" • ${playback.activeOutput.route.labelEs}")
-                                            },
+                                            title = if (es) "Ecualizador" else "Equalizer",
+                                            subtitle = "${if (playback.audio8dEnabled) "8D On" else "8D Off"} • ${playback.reverbMode.label} • ${playback.activeOutput.route.labelEs}",
                                             accent = palette.secondary,
                                             badge = if (playback.audio8dEnabled) "8D" else null,
                                             onClick = { page = SettingsPage.EQUALIZER },
                                         ),
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Storage,
-                                            title = if (es) "Caché Inteligente de Audio" else "Smart Audio Cache",
+                                            title = if (es) "Almacenamiento" else "Storage",
                                             subtitle = if (design.audioCacheLimitMb == 0) {
-                                                if (es) "Desactivada • Streaming puro" else "Off • Pure streaming"
+                                                if (es) "Caché desactivada" else "Cache disabled"
                                             } else {
-                                                "${"%.1f".format(audioCacheBytes / (1024f * 1024f))} MB usados de ${design.audioCacheLimitMb} MB"
+                                                "${"%.1f".format(audioCacheBytes / (1024f * 1024f))} MB / ${design.audioCacheLimitMb} MB"
                                             },
                                             accent = Color(0xFFFFB300),
-                                            badge = if (design.audioCacheLimitMb > 0) "${design.audioCacheLimitMb}MB" else "Off",
                                             onClick = {
                                                 onRefreshCacheSize()
                                                 page = SettingsPage.CACHE_STORAGE
@@ -542,9 +636,9 @@ fun SettingsAndStudioOverlay(
                                             icon = Icons.Rounded.Shield,
                                             title = "SponsorBlock",
                                             subtitle = if (design.sponsorBlockEnabled) {
-                                                if (es) "Saltando intros, patrocinios y partes no musicales" else "Auto-skipping sponsors & non-music"
+                                                if (es) "Activo • Saltando intros y patrocinios" else "Active • Skipping non-music"
                                             } else {
-                                                if (es) "Desactivado" else "Disabled"
+                                                if (es) "Desactivado" else "Off"
                                             },
                                             accent = Color(0xFF00E5FF),
                                             onClick = { page = SettingsPage.SPONSORBLOCK },
@@ -553,47 +647,58 @@ fun SettingsAndStudioOverlay(
                                 )
                             }
 
-                            // Group 4: Comportamiento y Sistema
                             item {
+                                val betaCount = listOf(design.artworkParallax3d, design.betaBlindDiscoveryEnabled, design.betaKaraokeEnabled).count { it }
                                 SegmentedSettingsGroup(
-                                    header = if (es) "COMPORTAMIENTO, BETA Y SISTEMA" else "BEHAVIOR, BETA & SYSTEM",
+                                    header = if (es) "SISTEMA Y EXTRAS" else "SYSTEM & EXTRAS",
                                     items = listOf(
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Science,
-                                            title = if (es) "Funciones BETA (Parallax 3D Giroscopio)" else "BETA Labs (3D Gyro Parallax)",
-                                            subtitle = if (design.artworkParallax3d) {
-                                                if (es) "Parallax 3D Giroscopio ACTIVO • Intensidad ${"%.1f".format(design.parallax3dIntensity)}x" else "3D Gyro Parallax ON"
-                                            } else {
-                                                if (es) "Activa y prueba funciones experimentales en tiempo real" else "Enable and test experimental features live"
-                                            },
+                                            title = if (es) "Funciones BETA" else "BETA Labs",
+                                            subtitle = if (es) "Parallax 3D, Modo Misterio 45s y Karaoke" else "3D Parallax, Blind Mode & Karaoke",
                                             accent = Color(0xFF00E5FF),
-                                            badge = "BETA",
+                                            badge = if (betaCount > 0) "$betaCount activas" else "BETA",
                                             onClick = { page = SettingsPage.BETA_LABS },
                                         ),
                                         SegmentedEntry(
+                                            icon = Icons.Rounded.Hub,
+                                            title = if (es) "Conexiones" else "Connections",
+                                            subtitle = "Discord RPC, Last.fm y ListenBrainz",
+                                            accent = Color(0xFF5865F2),
+                                            badge = if (serverState.integrations.isDiscordReady || serverState.integrations.isLastFmReady || serverState.integrations.isListenBrainzReady) "On" else null,
+                                            onClick = { page = SettingsPage.INTEGRATIONS },
+                                        ),
+                                        SegmentedEntry(
+                                            icon = Icons.Rounded.VisibilityOff,
+                                            title = if (es) "Privacidad" else "Privacy",
+                                            subtitle = if (design.privateSessionEnabled) {
+                                                if (es) "Sesión privada activa • ${blockedArtists.size} bloqueados" else "Incognito ON • ${blockedArtists.size} blocked"
+                                            } else {
+                                                if (es) "Sesión privada y ${blockedArtists.size} artistas bloqueados" else "Private session & ${blockedArtists.size} blocked"
+                                            },
+                                            accent = Color(0xFFCE93D8),
+                                            badge = if (design.privateSessionEnabled) "Privada" else null,
+                                            onClick = { page = SettingsPage.PRIVACY_BLOCKED },
+                                        ),
+                                        SegmentedEntry(
                                             icon = Icons.Rounded.TouchApp,
-                                            title = if (es) "Gestos y Hardware" else "Gestures & Hardware",
-                                            subtitle = if (es) "Deslizar carátula, doble toque ±${design.doubleTapSeekSeconds}s y agitar" else "Swipe artwork, double-tap ±${design.doubleTapSeekSeconds}s & shake",
+                                            title = if (es) "Gestos" else "Gestures",
+                                            subtitle = if (es) "Deslizar, doble toque ±${design.doubleTapSeekSeconds}s y agitar" else "Swipe, double-tap & shake",
                                             accent = palette.primary,
                                             onClick = { page = SettingsPage.GESTURES },
                                         ),
                                         SegmentedEntry(
                                             icon = Icons.Rounded.SystemUpdate,
                                             title = if (es) "Actualizaciones" else "Updates",
-                                            subtitle = if (updateInfo.hasUpdate) {
-                                                if (es) "Disponible: ${updateInfo.latestLabel}" else "Available: ${updateInfo.latestLabel}"
-                                            } else {
-                                                if (es) "Actualización directa sin conflicto de paquetes" else "Direct updates with permanent signature"
-                                            },
+                                            subtitle = if (updateInfo.hasUpdate) "${updateInfo.latestLabel}" else "v${BuildConfig.VERSION_NAME}",
                                             accent = Color(0xFF00E676),
-                                            badge = "v${BuildConfig.VERSION_NAME.substringBefore("-")}",
                                             highlightDot = updateInfo.hasUpdate,
                                             onClick = { page = SettingsPage.UPDATES },
                                         ),
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Info,
-                                            title = if (es) "Acerca de Croix Player Prime" else "About Croix Player Prime",
-                                            subtitle = "v${BuildConfig.VERSION_NAME} • arm64-v8a • Android 12+",
+                                            title = if (es) "Acerca de" else "About",
+                                            subtitle = "Croix Player Prime • v${BuildConfig.VERSION_NAME}",
                                             accent = palette.secondary,
                                             onClick = { page = SettingsPage.ABOUT },
                                         ),
@@ -616,6 +721,350 @@ fun SettingsAndStudioOverlay(
                                             labelOf = { if (es) it.labelEs else it.labelEn },
                                         ) { lang ->
                                             onUpdateDesign { it.copy(languageMode = lang) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================
+                        // SUBMENU: ACCOUNT HUB (GAUSSIAN BLUR PROFILE + BRAND CHANNELS + MULTI-ACCOUNT)
+                        // =========================================================
+                        SettingsPage.ACCOUNT -> {
+                            val cfg = serverState.serverConfig
+                            if (serverNotice != null) {
+                                item {
+                                    CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary) {
+                                        Text(serverNotice, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(14.dp))
+                                    }
+                                }
+                            }
+                            // Hero Profile Card with Gaussian-Blurred Avatar Backdrop
+                            item {
+                                val avatar = cfg.ytMusicAccountAvatarUrl
+                                CroixGlassCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    cornerRadius = 26.dp,
+                                    accentTint = palette.primary,
+                                ) {
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        if (avatar.isNotBlank()) {
+                                            AsyncImage(
+                                                model = avatar,
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .matchParentSize()
+                                                    .blur(30.dp),
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .matchParentSize()
+                                                    .background(
+                                                        Brush.linearGradient(
+                                                            listOf(
+                                                                palette.primary.copy(alpha = 0.55f),
+                                                                palette.secondary.copy(alpha = 0.35f),
+                                                                Color(0xFF0A0912),
+                                                            ),
+                                                        ),
+                                                    ),
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .matchParentSize()
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        listOf(Color.Black.copy(alpha = 0.35f), Color.Black.copy(alpha = 0.78f)),
+                                                    ),
+                                                ),
+                                        )
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(20.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(84.dp)
+                                                    .clip(CircleShape)
+                                                    .background(palette.primary.copy(alpha = 0.3f))
+                                                    .border(2.5.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                if (avatar.isNotBlank()) {
+                                                    AsyncImage(
+                                                        model = avatar,
+                                                        contentDescription = cfg.ytMusicAccountName,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                    )
+                                                } else {
+                                                    Icon(Icons.Rounded.Person, null, tint = Color.White, modifier = Modifier.size(42.dp))
+                                                }
+                                            }
+                                            Text(
+                                                text = if (serverState.isYtMusicConnected) cfg.ytMusicAccountName else (if (es) "Sin cuenta conectada" else "Not signed in"),
+                                                style = MaterialTheme.typography.headlineMedium,
+                                                fontWeight = FontWeight.Black,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            val subLine = listOf(cfg.ytMusicAccountHandle, cfg.ytMusicAccountEmail)
+                                                .filter { it.isNotBlank() }
+                                                .joinToString(" • ")
+                                            if (subLine.isNotBlank()) {
+                                                Text(subLine, color = Color.White.copy(alpha = 0.82f), style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            if (serverState.ytMusicSyncSummary.isNotBlank()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(50.dp))
+                                                        .background(Color.White.copy(alpha = 0.16f))
+                                                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                                                ) {
+                                                    Text(serverState.ytMusicSyncSummary, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            ) {
+                                                if (serverState.isYtMusicConnected) {
+                                                    Button(
+                                                        enabled = !ytMusicSyncing,
+                                                        onClick = onSyncYtMusicNow,
+                                                        modifier = Modifier.weight(1f),
+                                                    ) {
+                                                        if (ytMusicSyncing) {
+                                                            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                                                            Spacer(Modifier.width(6.dp))
+                                                        } else {
+                                                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+                                                            Spacer(Modifier.width(6.dp))
+                                                        }
+                                                        Text(if (es) "Sincronizar" else "Sync Now")
+                                                    }
+                                                    OutlinedButton(
+                                                        onClick = onDisconnectYtMusic,
+                                                        modifier = Modifier.weight(1f),
+                                                    ) { Text(strings.disconnect) }
+                                                } else {
+                                                    Button(
+                                                        onClick = onOpenYtMusicLogin,
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                    ) {
+                                                        Icon(Icons.Rounded.Link, null, modifier = Modifier.size(18.dp))
+                                                        Spacer(Modifier.width(8.dp))
+                                                        Text(if (es) "Conectar cuenta de YouTube Music" else "Sign in to YouTube Music")
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Automatic Synchronization Toggle
+                            if (serverState.isYtMusicConnected) {
+                                item {
+                                    CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            StudioSwitch(
+                                                if (es) "Sincronización automática al iniciar" else "Auto-sync library on launch",
+                                                cfg.ytMusicAutoSync,
+                                            ) { en ->
+                                                onUpdateServerConfig { it.copy(ytMusicAutoSync = en) }
+                                            }
+                                            Text(
+                                                if (es) "Sincroniza tus Me gusta, Historial y Playlists automáticamente y personaliza tus Selecciones Rápidas en Inicio." else "Automatically syncs Likes, History & Playlists and drives Home Quick Picks.",
+                                                color = palette.textSecondary,
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Brand Profiles / Channels on the SAME Gmail!
+                                item {
+                                    CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Icon(Icons.Rounded.SwapHoriz, null, tint = palette.primary, modifier = Modifier.size(20.dp))
+                                                    Text(if (es) "Perfiles / Canales de este correo" else "Profiles / Channels", color = Color.White, fontWeight = FontWeight.Bold)
+                                                }
+                                                TextButton(onClick = onRefreshYtMusicProfiles) {
+                                                    Text(if (es) "Buscar" else "Refresh")
+                                                }
+                                            }
+                                            if (serverState.ytMusicBrandProfiles.isEmpty()) {
+                                                Text(
+                                                    if (es) "Toca «Buscar» para listar todos los canales o perfiles de marca asociados a tu Gmail." else "Tap Refresh to detect brand channels under your Gmail.",
+                                                    color = palette.textSecondary,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                )
+                                            } else {
+                                                serverState.ytMusicBrandProfiles.forEach { prof ->
+                                                    val isCurrent = prof.isSelected ||
+                                                        (cfg.ytMusicPageId.isNotBlank() && cfg.ytMusicPageId == prof.pageId) ||
+                                                        (cfg.ytMusicPageId.isBlank() && prof.name.equals(cfg.ytMusicAccountName, ignoreCase = true))
+                                                    CroixGlassCard(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        cornerRadius = 14.dp,
+                                                        accentTint = if (isCurrent) palette.primary else null,
+                                                        onClick = { if (!isCurrent && !ytMusicSyncing) onSwitchYtMusicProfile(prof) },
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                        ) {
+                                                            Box(
+                                                                modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f)),
+                                                                contentAlignment = Alignment.Center,
+                                                            ) {
+                                                                if (prof.avatarUrl.isNotBlank()) {
+                                                                    AsyncImage(
+                                                                        model = prof.avatarUrl,
+                                                                        contentDescription = prof.name,
+                                                                        contentScale = ContentScale.Crop,
+                                                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                                    )
+                                                                } else {
+                                                                    Icon(Icons.Rounded.Person, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                                                }
+                                                            }
+                                                            Column(modifier = Modifier.weight(1f)) {
+                                                                Text(prof.name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                                val meta = prof.channelHandle.ifBlank { prof.byline }.ifBlank { "Canal YouTube" }
+                                                                Text(meta, color = palette.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                                            }
+                                                            if (isCurrent) {
+                                                                Icon(Icons.Rounded.CheckCircle, null, tint = Color(0xFF00E676), modifier = Modifier.size(20.dp))
+                                                            } else {
+                                                                Text(if (es) "Usar" else "Switch", color = palette.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Switch Account / Saved Google Accounts
+                            item {
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(if (es) "Cambiar de cuenta" else "Switch Account", color = Color.White, fontWeight = FontWeight.Bold)
+                                            CroixGlassCard(
+                                                cornerRadius = 50.dp,
+                                                accentTint = palette.secondary,
+                                                onClick = onOpenAddYtMusicAccount,
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                                ) {
+                                                    Icon(Icons.Rounded.PersonAdd, null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                                    Text(if (es) "Añadir cuenta" else "Add Account", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                        }
+                                        if (serverState.savedYtAccounts.isEmpty()) {
+                                            Text(
+                                                if (es) "Agrega una o más cuentas de Google para cambiar entre ellas en 1 toque." else "Add one or more Google accounts to switch in 1 tap.",
+                                                color = palette.textSecondary,
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        } else {
+                                            serverState.savedYtAccounts.forEach { acc ->
+                                                val isActive = serverState.isYtMusicConnected && acc.cookie == cfg.ytMusicCookie
+                                                CroixGlassCard(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    cornerRadius = 14.dp,
+                                                    accentTint = if (isActive) Color(0xFF00E676) else null,
+                                                    onClick = { if (!isActive && !ytMusicSyncing) onSwitchSavedYtAccount(acc) },
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier.size(38.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f)),
+                                                            contentAlignment = Alignment.Center,
+                                                        ) {
+                                                            if (acc.avatarUrl.isNotBlank()) {
+                                                                AsyncImage(
+                                                                    model = acc.avatarUrl,
+                                                                    contentDescription = acc.name,
+                                                                    contentScale = ContentScale.Crop,
+                                                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                                )
+                                                            } else {
+                                                                Icon(Icons.Rounded.Person, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                                            }
+                                                        }
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(acc.name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                            Text(acc.email.ifBlank { acc.channelHandle }.ifBlank { "Cuenta guardada" }, color = palette.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                                        }
+                                                        if (isActive) {
+                                                            Text(if (es) "Activa" else "Active", color = Color(0xFF00E676), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                        } else {
+                                                            TextButton(onClick = { onRemoveSavedYtAccount(acc.id) }) {
+                                                                Text(if (es) "Quitar" else "Remove", fontSize = 11.sp)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Playlists synced from active YT Music profile
+                            if (serverState.isYtMusicConnected && serverState.ytMusicPlaylists.isNotEmpty()) {
+                                item {
+                                    CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(if (es) "Tus Playlists de YouTube Music (${serverState.ytMusicPlaylists.size})" else "Your YouTube Music Playlists", color = palette.primary, fontWeight = FontWeight.Bold)
+                                            serverState.ytMusicPlaylists.take(15).forEach { pl ->
+                                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 12.dp) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                    ) {
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(pl.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                            if (pl.subtitle.isNotBlank()) {
+                                                                Text(pl.subtitle, color = palette.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                                            }
+                                                        }
+                                                        TextButton(onClick = { onImportYtMusicPlaylist(pl) }) { Text(if (es) "Importar" else "Import") }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1635,10 +2084,12 @@ fun SettingsAndStudioOverlay(
                             item {
                                 CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary) {
                                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        Text(if (es) "Karaoke, Audio Espacial 8D y Reverb" else "Karaoke, 8D Spatial Audio & Reverb", color = palette.primary, fontWeight = FontWeight.Bold)
-                                        StudioSwitch(if (es) "Modo Karaoke (Reducir voz principal)" else "Karaoke Vocal Remover", playback.karaokeEnabled, onSetKaraokeEnabled)
-                                        if (playback.karaokeEnabled) {
-                                            StudioSlider(if (es) "Reducción de Voz Karaoke" else "Vocal Reduction", playback.karaokeStrength, 0.3f..1.0f, "${(playback.karaokeStrength * 100).roundToInt()}%", onSetKaraokeStrength)
+                                        Text(if (es) "Audio Espacial 8D, Reverb y AutoEq" else "8D Spatial Audio, Reverb & AutoEq", color = palette.primary, fontWeight = FontWeight.Bold)
+                                        if (design.betaKaraokeEnabled) {
+                                            StudioSwitch(if (es) "Modo Karaoke [BETA] (Reducir voz)" else "Karaoke Vocal Remover [BETA]", playback.karaokeEnabled, onSetKaraokeEnabled)
+                                            if (playback.karaokeEnabled) {
+                                                StudioSlider(if (es) "Reducción de Voz Karaoke" else "Vocal Reduction", playback.karaokeStrength, 0.3f..1.0f, "${(playback.karaokeStrength * 100).roundToInt()}%", onSetKaraokeStrength)
+                                            }
                                         }
                                         StudioSwitch(if (es) "Activar Audio Espacial 8D (Estéreo Orbital)" else "Enable 8D Spatial Audio", playback.audio8dEnabled, onSetAudio8dEnabled)
                                         if (playback.audio8dEnabled) {
@@ -1851,9 +2302,54 @@ fun SettingsAndStudioOverlay(
                         }
 
                         // =========================================================
-                        // SUBMENU: BETA LABS (LIVE 3D GYRO PARALLAX TESTER!)
+                        // SUBMENU: BETA LABS (PARALLAX 3D + MODO MISTERIO + KARAOKE — ALL OFF BY DEFAULT!)
                         // =========================================================
                         SettingsPage.BETA_LABS -> {
+                            // BETA 1: Modo Misterio 45s ???
+                            item {
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFFF4081)) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Rounded.QuestionMark, null, tint = Color(0xFFFF4081), modifier = Modifier.size(20.dp))
+                                            Text(if (es) "Modo Misterio 45s ??? [BETA]" else "Blind Discovery 45s ??? [BETA]", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                        }
+                                        Text(
+                                            if (es) "Desactivado por defecto. Al activarlo aparece la playlist misteriosa en Inicio: los primeros 45s de cada canción se difuminan con «???» y luego se revelan poco a poco." else "Off by default. Adds the 45s blurred mystery playlist card to Home.",
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        StudioSwitch(if (es) "Activar Modo Misterio en Inicio" else "Enable Mystery Mode on Home", design.betaBlindDiscoveryEnabled) { v ->
+                                            onUpdateDesign { it.copy(betaBlindDiscoveryEnabled = v) }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // BETA 2: Modo Karaoke DSP
+                            item {
+                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = Color(0xFFFF4081)) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Rounded.Mic, null, tint = Color(0xFFFF4081), modifier = Modifier.size(20.dp))
+                                            Text(if (es) "Modo Karaoke en Vivo [BETA]" else "Live Karaoke Mode [BETA]", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                        }
+                                        Text(
+                                            if (es) "Desactivado por defecto. Al activarlo aparece el botón de micrófono junto a Play/Pausa que reduce la voz en tiempo real y abre las letras sincronizadas." else "Off by default. Adds the vocal-remover Karaoke mic button in the player dock.",
+                                            color = palette.textSecondary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        StudioSwitch(if (es) "Activar Modo Karaoke [BETA]" else "Enable Karaoke Mode [BETA]", design.betaKaraokeEnabled) { v ->
+                                            onUpdateDesign { it.copy(betaKaraokeEnabled = v) }
+                                            if (!v && playback.karaokeEnabled) onSetKaraokeEnabled(false)
+                                        }
+                                        if (design.betaKaraokeEnabled) {
+                                            StudioSlider(if (es) "Reducción de Voz Karaoke" else "Vocal Reduction", playback.karaokeStrength, 0.3f..1.0f, "${(playback.karaokeStrength * 100).roundToInt()}%", onSetKaraokeStrength)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // BETA 3: Carátula 3D Parallax Giroscopio + Tarjeta en vivo
                             item {
                                 val liveTilt by rememberParallaxTiltState(
                                     enabled = design.artworkParallax3d,
@@ -1870,14 +2366,14 @@ fun SettingsAndStudioOverlay(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            Text("LABORATORIO BETA", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                                            Text("PARALLAX 3D GIROSCOPIO", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(50.dp))
                                                     .background(Color(0xFF00E5FF).copy(alpha = 0.22f))
                                                     .padding(horizontal = 10.dp, vertical = 4.dp),
                                             ) {
-                                                Text("EXPERIMENTAL", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                                Text("BETA", color = Color.White, style = MaterialTheme.typography.labelSmall)
                                             }
                                         }
 
@@ -2275,6 +2771,9 @@ fun SettingsAndStudioOverlay(
         )
     }
 }
+
+private fun cfgNameOrSync(state: ServerSessionState): String =
+    state.serverConfig.ytMusicAccountName.ifBlank { "Cuenta conectada" }
 
 @Composable
 private fun SegmentedSettingsGroup(

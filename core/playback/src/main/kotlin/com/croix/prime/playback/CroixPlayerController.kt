@@ -326,19 +326,19 @@ class CroixPlayerController(
         }
         startPlayingInternal(track)
 
-        if (autoFetchRadio && queueList.size <= 3) {
+        if (autoFetchRadio && queueList.size <= 5) {
             scope.launch {
                 val blocked = blockedArtistKeysProvider()
-                val rawRadio = innerTube.fetchRadioQueue(track.id, limit = 22)
+                val rawRadio = innerTube.fetchRadioQueue(track.id, limit = 60)
                 var filtered = HybridAlgorithmEngine.filterRelatedRadioTracks(
                     candidates = rawRadio,
                     existingQueue = _state.value.queue,
                     blockedArtistKeys = blocked,
                 )
-                if (filtered.size < 4 && track.artist.isNotBlank()) {
+                if (filtered.size < 14 && track.artist.isNotBlank()) {
                     val primaryArtist = track.artist.split(",", "&", "feat.", "ft.", ignoreCase = true).firstOrNull()?.trim().orEmpty()
                     if (primaryArtist.isNotBlank()) {
-                        val fallback = innerTube.searchSongs("$primaryArtist canciones populares mix", limit = 16)
+                        val fallback = innerTube.searchSongs("$primaryArtist canciones populares mix", limit = 25)
                         filtered = filtered + HybridAlgorithmEngine.filterRelatedRadioTracks(
                             candidates = fallback,
                             existingQueue = _state.value.queue + filtered,
@@ -355,7 +355,6 @@ class CroixPlayerController(
                         )
                         cur.copy(queue = cur.queue + cleanToAdd)
                     }
-                    // Prefetch the very next radio track so advancing is instantaneous
                     filtered.firstOrNull()?.let { nextTrack ->
                         if (localFileProvider(nextTrack.id) == null) {
                             launch(Dispatchers.IO) { innerTube.prefetchAudioStream(nextTrack.id) }
@@ -611,9 +610,10 @@ class CroixPlayerController(
                     if (nextTrack != null && localFileProvider(nextTrack.id) == null) {
                         innerTube.prefetchAudioStream(nextTrack.id)
                     }
-                    // Smart Autoplay: keep queue alive when approaching the last 2 tracks (excluding duplicate song titles & blocked artists)
-                    if (autoPlayRelatedProvider() && q.size - nextIdx <= 2) {
-                        val more = innerTube.fetchRadioQueue(track.id, limit = 16)
+                    // Deep Smart Autoplay: keep queue extensively stocked (50-80+ songs!) when approaching last 12 tracks
+                    if (autoPlayRelatedProvider() && q.size - nextIdx <= 12) {
+                        val anchorId = q.lastOrNull()?.id ?: track.id
+                        val more = innerTube.fetchRadioQueue(anchorId, limit = 42)
                         if (more.isNotEmpty()) {
                             val blocked = blockedArtistKeysProvider()
                             _state.update { cur ->

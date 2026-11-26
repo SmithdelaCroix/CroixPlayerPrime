@@ -133,6 +133,36 @@ data class YtMusicPlaylistSummary(
 )
 
 @Serializable
+data class YtMusicAccountProfile(
+    val name: String,
+    val email: String = "",
+    val channelHandle: String = "",
+    val avatarUrl: String = "",
+    val pageId: String = "",
+    val dataSyncId: String = "",
+    val authUser: String = "0",
+    val byline: String = "",
+    val isSelected: Boolean = false,
+) {
+    val profileKey: String
+        get() = pageId.ifBlank { dataSyncId }.ifBlank { channelHandle }.ifBlank { name }
+}
+
+@Serializable
+data class SavedYtMusicAccount(
+    val id: String,
+    val name: String,
+    val email: String = "",
+    val channelHandle: String = "",
+    val avatarUrl: String = "",
+    val cookie: String,
+    val visitorData: String = "",
+    val dataSyncId: String = "",
+    val pageId: String = "",
+    val authUser: String = "0",
+)
+
+@Serializable
 data class YtMusicLibrarySyncSnapshot(
     val likedSongs: List<Track> = emptyList(),
     val historyTracks: List<Track> = emptyList(),

@@ -54,6 +54,7 @@ import com.croix.prime.engine.LyricsResult
 import com.croix.prime.engine.LyricsTranslator
 import com.croix.prime.engine.MoodChip
 import com.croix.prime.engine.RelatedArtist
+import com.croix.prime.engine.SavedYtMusicAccount
 import com.croix.prime.engine.ScrobbleClient
 import com.croix.prime.engine.ServerConnectionConfig
 import com.croix.prime.engine.ServerHealthStatus
@@ -64,6 +65,7 @@ import com.croix.prime.engine.SpotifyPlaylistSummary
 import com.croix.prime.engine.SpotifyTasteClient
 import com.croix.prime.engine.SpotifyTasteSnapshot
 import com.croix.prime.engine.Track
+import com.croix.prime.engine.YtMusicAccountProfile
 import com.croix.prime.engine.YtMusicPlaylistSummary
 import com.croix.prime.playback.AudioOutputRoute
 import com.croix.prime.playback.AutoEqHeadphoneProfile
@@ -366,12 +368,24 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     private fun observeServerConfig() {
         viewModelScope.launch {
             var initialized = false
+            var autoSyncedOnLaunch = false
             serverState.collect { session ->
                 innerTube.updateServerConfig(session.serverConfig)
                 _adsBlockedCount.value = AdBlockEngine.blockedCount.get()
                 if (!initialized) {
                     initialized = true
                     pingServer()
+                }
+                if (!autoSyncedOnLaunch && session.isYtMusicConnected) {
+                    autoSyncedOnLaunch = true
+                    if (session.ytMusicBrandProfiles.isEmpty()) {
+                        refreshYtMusicBrandProfiles()
+                    }
+                    if (session.serverConfig.ytMusicAutoSync) {
+                        syncYtMusicLibrary(silent = true)
+                    } else {
+                        refreshHome()
+                    }
                 }
             }
         }
@@ -397,6 +411,9 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                 CroixAudioCache.configureLimitMb(appContext, cfg.audioCacheLimitMb)
                 if (cfg.privateSessionEnabled) {
                     discordRpc.clearPresence()
+                }
+                if (!cfg.betaKaraokeEnabled && playbackState.value.karaokeEnabled) {
+                    playerController.setKaraokeEnabled(false)
                 }
             }
         }
@@ -987,6 +1004,8 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                 blendWeight = session.spotifyBlendWeight,
                 isSpanish = isSpanish,
                 blockedArtistKeys = blockedKeys,
+                ytMusicHistory = session.ytMusicHistoryTracks,
+                ytMusicLiked = session.ytMusicLikedTracks,
             )
             _homeFeed.value = bundle
             _adsBlockedCount.value = AdBlockEngine.blockedCount.get()
@@ -1173,29 +1192,197 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun connectYtMusicCookie(cookie: String) {
+    fun connectYtMusicAccount(
+        cookie: String,
+        visitorData: String = "",
+        dataSyncId: String = "",
+        authUser: String = "0",
+    ) {
         viewModelScope.launch {
+            _ytMusicSyncing.value = true
             _serverNotice.value = "⏳ Conectando cuenta de YouTube Music..."
-            val res = innerTube.verifyYtMusicAccount(cookie)
-            res.onSuccess { accountName ->
+            val res = innerTube.verifyYtMusicAccount(
+                cookie = cookie,
+                visitorData = visitorData,
+                dataSyncId = dataSyncId,
+                authUser = authUser,
+            )
+            res.onSuccess { profile ->
+                val brandProfiles = innerTube.fetchYtMusicBrandProfiles(
+                    cookie = cookie,
+                    visitorData = visitorData,
+                    authUser = profile.authUser,
+                ).getOrElse { listOf(profile) }
+                    .ifEmpty { listOf(profile) }
+
+                val accountId = profile.email.ifBlank { profile.channelHandle }.ifBlank { profile.name }.lowercase()
+                val savedEntry = SavedYtMusicAccount(
+                    id = accountId,
+                    name = profile.name,
+                    email = profile.email,
+                    channelHandle = profile.channelHandle,
+                    avatarUrl = profile.avatarUrl,
+                    cookie = cookie,
+                    visitorData = visitorData,
+                    dataSyncId = dataSyncId,
+                    pageId = "",
+                    authUser = profile.authUser,
+                )
                 serverRepo.update { s ->
-                    val cfg = s.serverConfig.copy(ytMusicCookie = cookie, ytMusicAccountName = accountName)
+                    val cfg = s.serverConfig.copy(
+                        ytMusicCookie = cookie,
+                        ytMusicAccountName = profile.name,
+                        ytMusicAccountEmail = profile.email,
+                        ytMusicAccountHandle = profile.channelHandle,
+                        ytMusicAccountAvatarUrl = profile.avatarUrl,
+                        ytMusicVisitorData = visitorData,
+                        ytMusicDataSyncId = dataSyncId,
+                        ytMusicPageId = "",
+                        ytMusicAuthUser = profile.authUser,
+                    )
                     innerTube.updateServerConfig(cfg)
-                    s.copy(serverConfig = cfg)
+                    val updatedSaved = (s.savedYtAccounts.filterNot { it.id == accountId } + savedEntry)
+                    s.copy(
+                        serverConfig = cfg,
+                        ytMusicBrandProfiles = brandProfiles,
+                        savedYtAccounts = updatedSaved,
+                    )
                 }
-                _serverNotice.value = "✓ YouTube Music conectado: $accountName"
-                syncYtMusicLibrary()
+                _serverNotice.value = "✓ Cuenta conectada: ${profile.name}"
+                syncYtMusicLibrary(silent = false)
             }.onFailure { err ->
                 _serverNotice.value = "✕ ${err.message ?: "Error al conectar YT Music"}"
+                _ytMusicSyncing.value = false
             }
         }
     }
 
-    fun syncYtMusicLibrary() {
+    fun refreshYtMusicBrandProfiles() {
+        val cfg = serverState.value.serverConfig
+        if (!cfg.hasYtMusicAccount) return
+        viewModelScope.launch {
+            val res = innerTube.fetchYtMusicBrandProfiles(
+                cookie = cfg.ytMusicCookie,
+                visitorData = cfg.ytMusicVisitorData,
+                authUser = cfg.ytMusicAuthUser,
+            )
+            res.onSuccess { list ->
+                if (list.isNotEmpty()) {
+                    serverRepo.update { s -> s.copy(ytMusicBrandProfiles = list) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Switches between YouTube Brand Profiles / Channels under the same Google account!
+     */
+    fun switchYtMusicBrandProfile(profile: YtMusicAccountProfile) {
+        val cur = serverState.value
+        if (!cur.isYtMusicConnected) return
+        viewModelScope.launch {
+            _ytMusicSyncing.value = true
+            _serverNotice.value = "⏳ Cambiando al perfil ${profile.name}..."
+            serverRepo.update { s ->
+                val newCfg = s.serverConfig.copy(
+                    ytMusicAccountName = profile.name,
+                    ytMusicAccountHandle = profile.channelHandle.ifBlank { profile.byline },
+                    ytMusicAccountAvatarUrl = profile.avatarUrl.ifBlank { s.serverConfig.ytMusicAccountAvatarUrl },
+                    ytMusicPageId = profile.pageId,
+                    ytMusicDataSyncId = profile.dataSyncId.ifBlank { s.serverConfig.ytMusicDataSyncId },
+                )
+                innerTube.updateServerConfig(newCfg)
+                val updatedProfiles = s.ytMusicBrandProfiles.map { p ->
+                    p.copy(isSelected = p.profileKey == profile.profileKey)
+                }
+                s.copy(
+                    serverConfig = newCfg,
+                    ytMusicBrandProfiles = updatedProfiles,
+                    ytMusicHistoryTracks = emptyList(),
+                    ytMusicLikedTracks = emptyList(),
+                    ytMusicPlaylists = emptyList(),
+                )
+            }
+            syncYtMusicLibrary(silent = false)
+        }
+    }
+
+    /**
+     * Switches between completely different saved Google / YouTube Music accounts in 1 tap!
+     */
+    fun switchSavedYtMusicAccount(account: SavedYtMusicAccount) {
+        viewModelScope.launch {
+            _ytMusicSyncing.value = true
+            _serverNotice.value = "⏳ Cambiando a cuenta ${account.name}..."
+            val cfg = serverState.value.serverConfig.copy(
+                ytMusicCookie = account.cookie,
+                ytMusicAccountName = account.name,
+                ytMusicAccountEmail = account.email,
+                ytMusicAccountHandle = account.channelHandle,
+                ytMusicAccountAvatarUrl = account.avatarUrl,
+                ytMusicVisitorData = account.visitorData,
+                ytMusicDataSyncId = account.dataSyncId,
+                ytMusicPageId = account.pageId,
+                ytMusicAuthUser = account.authUser,
+            )
+            innerTube.updateServerConfig(cfg)
+            val profiles = innerTube.fetchYtMusicBrandProfiles(
+                cookie = account.cookie,
+                visitorData = account.visitorData,
+                authUser = account.authUser,
+            ).getOrElse { emptyList() }
+
+            serverRepo.update { s ->
+                s.copy(
+                    serverConfig = cfg,
+                    ytMusicBrandProfiles = profiles,
+                    ytMusicHistoryTracks = emptyList(),
+                    ytMusicLikedTracks = emptyList(),
+                    ytMusicPlaylists = emptyList(),
+                )
+            }
+            syncYtMusicLibrary(silent = false)
+        }
+    }
+
+    fun removeSavedYtMusicAccount(accountId: String) {
+        viewModelScope.launch {
+            serverRepo.update { s ->
+                s.copy(savedYtAccounts = s.savedYtAccounts.filterNot { it.id == accountId })
+            }
+        }
+    }
+
+    fun syncYtMusicLibrary(silent: Boolean = false) {
         viewModelScope.launch {
             if (!serverState.value.isYtMusicConnected) return@launch
             _ytMusicSyncing.value = true
-            _serverNotice.value = "⏳ Sincronizando biblioteca real de YouTube Music..."
+            if (!silent) {
+                _serverNotice.value = "⏳ Sincronizando tu biblioteca de YouTube Music..."
+            }
+            // Refresh avatar/name info too if missing
+            val curCfg = serverState.value.serverConfig
+            if (curCfg.ytMusicAccountAvatarUrl.isBlank()) {
+                innerTube.verifyYtMusicAccount(
+                    cookie = curCfg.ytMusicCookie,
+                    visitorData = curCfg.ytMusicVisitorData,
+                    dataSyncId = curCfg.ytMusicDataSyncId,
+                    pageId = curCfg.ytMusicPageId,
+                    authUser = curCfg.ytMusicAuthUser,
+                ).onSuccess { freshProfile ->
+                    serverRepo.update { s ->
+                        val updated = s.serverConfig.copy(
+                            ytMusicAccountName = freshProfile.name.ifBlank { s.serverConfig.ytMusicAccountName },
+                            ytMusicAccountEmail = freshProfile.email.ifBlank { s.serverConfig.ytMusicAccountEmail },
+                            ytMusicAccountHandle = freshProfile.channelHandle.ifBlank { s.serverConfig.ytMusicAccountHandle },
+                            ytMusicAccountAvatarUrl = freshProfile.avatarUrl.ifBlank { s.serverConfig.ytMusicAccountAvatarUrl },
+                        )
+                        innerTube.updateServerConfig(updated)
+                        s.copy(serverConfig = updated)
+                    }
+                }
+            }
+
             val syncRes = innerTube.syncYtMusicAccountLibrary()
             syncRes.onSuccess { snap ->
                 withContext(Dispatchers.IO) {
@@ -1235,13 +1422,20 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
                 serverRepo.update { s ->
                     s.copy(
                         ytMusicPlaylists = snap.playlists,
+                        ytMusicHistoryTracks = snap.historyTracks,
+                        ytMusicLikedTracks = snap.likedSongs,
                         ytMusicSyncSummary = summary,
+                        ytMusicLastSyncMs = snap.syncedAtEpochMs,
                     )
                 }
-                _serverNotice.value = "✓ YT Music sincronizado: $summary"
+                if (!silent) {
+                    _serverNotice.value = "✓ Sincronizado: $summary"
+                }
                 refreshHome()
             }.onFailure { err ->
-                _serverNotice.value = "✕ Sync YT Music: ${err.message ?: "Error de red"}"
+                if (!silent) {
+                    _serverNotice.value = "✕ Error de sincronización: ${err.message ?: "Red no disponible"}"
+                }
             }
             _ytMusicSyncing.value = false
         }
@@ -1250,7 +1444,7 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     fun importYtMusicPlaylist(playlist: YtMusicPlaylistSummary) {
         viewModelScope.launch {
             _ytMusicSyncing.value = true
-            _serverNotice.value = "⏳ Importando «${playlist.title}» de YT Music..."
+            _serverNotice.value = "⏳ Importando «${playlist.title}»..."
             val res = innerTube.fetchYtMusicPlaylistTracks(playlist.browseId)
             res.onSuccess { tracks ->
                 withContext(Dispatchers.IO) {
@@ -1280,12 +1474,26 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
     fun disconnectYtMusic() {
         viewModelScope.launch {
             serverRepo.update { s ->
-                val cfg = s.serverConfig.copy(ytMusicCookie = "", ytMusicAccountName = "")
+                val cfg = s.serverConfig.copy(
+                    ytMusicCookie = "",
+                    ytMusicAccountName = "",
+                    ytMusicAccountEmail = "",
+                    ytMusicAccountHandle = "",
+                    ytMusicAccountAvatarUrl = "",
+                    ytMusicVisitorData = "",
+                    ytMusicDataSyncId = "",
+                    ytMusicPageId = "",
+                    ytMusicAuthUser = "0",
+                )
                 innerTube.updateServerConfig(cfg)
                 s.copy(
                     serverConfig = cfg,
                     ytMusicPlaylists = emptyList(),
+                    ytMusicHistoryTracks = emptyList(),
+                    ytMusicLikedTracks = emptyList(),
+                    ytMusicBrandProfiles = emptyList(),
                     ytMusicSyncSummary = "",
+                    ytMusicLastSyncMs = 0L,
                 )
             }
             _serverNotice.value = null

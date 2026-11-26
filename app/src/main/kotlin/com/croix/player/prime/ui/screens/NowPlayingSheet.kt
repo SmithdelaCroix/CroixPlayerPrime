@@ -1261,26 +1261,42 @@ fun NowPlayingOverlay(
                             Icon(Icons.Rounded.SkipNext, contentDescription = "Siguiente", tint = Color.White, modifier = Modifier.size(34.dp))
                         }
 
-                        // Dedicated Karaoke Microphone button right next to Play/Next: reduces vocals + opens Lyrics!
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // Dedicated Karaoke Microphone button ONLY when Karaoke [BETA] is enabled in BETA Labs;
+                        // otherwise show a clean Lyrics quick button to keep transport controls symmetrical!
+                        if (design.betaKaraokeEnabled) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                IconButton(
+                                    onClick = {
+                                        val nextKaraoke = !playback.karaokeEnabled
+                                        onToggleKaraoke(nextKaraoke)
+                                        if (nextKaraoke) activePanel = 1
+                                    },
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(if (playback.karaokeEnabled) Color(0xFFFF4081).copy(alpha = 0.28f) else Color.Transparent),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Mic,
+                                        contentDescription = "Modo Karaoke [BETA]",
+                                        tint = if (playback.karaokeEnabled) Color(0xFFFF4081) else palette.textSecondary,
+                                    )
+                                }
+                                if (playback.karaokeEnabled) {
+                                    Text("Karaoke", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF4081))
+                                }
+                            }
+                        } else {
                             IconButton(
-                                onClick = {
-                                    val nextKaraoke = !playback.karaokeEnabled
-                                    onToggleKaraoke(nextKaraoke)
-                                    if (nextKaraoke) activePanel = 1
-                                },
+                                onClick = { activePanel = if (activePanel == 1) 0 else 1 },
                                 modifier = Modifier
                                     .clip(CircleShape)
-                                    .background(if (playback.karaokeEnabled) Color(0xFFFF4081).copy(alpha = 0.28f) else Color.Transparent),
+                                    .background(if (activePanel == 1) palette.primary.copy(alpha = 0.24f) else Color.Transparent),
                             ) {
                                 Icon(
-                                    Icons.Rounded.Mic,
-                                    contentDescription = "Modo Karaoke",
-                                    tint = if (playback.karaokeEnabled) Color(0xFFFF4081) else palette.textSecondary,
+                                    Icons.Rounded.Lyrics,
+                                    contentDescription = "Letras",
+                                    tint = if (activePanel == 1) palette.primary else palette.textSecondary,
                                 )
-                            }
-                            if (playback.karaokeEnabled) {
-                                Text("Karaoke", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF4081))
                             }
                         }
                     }
@@ -1296,7 +1312,7 @@ fun NowPlayingOverlay(
                         PanelToggleIcon(Icons.Rounded.Lyrics, strings.lyrics, activePanel == 1) {
                             activePanel = if (activePanel == 1) 0 else 1
                         }
-                        PanelToggleIcon(Icons.Rounded.QueueMusic, strings.queue, activePanel == 2) {
+                        PanelToggleIcon(Icons.Rounded.QueueMusic, "${strings.queue} (${playback.queue.size})", activePanel == 2) {
                             activePanel = if (activePanel == 2) 0 else 2
                         }
                         PanelToggleIcon(Icons.Rounded.Equalizer, strings.audio, activePanel == 3) {
@@ -1959,6 +1975,7 @@ private fun EqualizerAndSpatialPanel(
     onSetBassBoost: (Float) -> Unit,
     onSetLoudness: (Int) -> Unit,
 ) {
+    val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
     val es = LocalCroixStrings.current.isSpanish
     val bandLabels = listOf("60Hz", "230Hz", "910Hz", "3.6kHz", "14kHz")
@@ -1983,20 +2000,22 @@ private fun EqualizerAndSpatialPanel(
                 )
             }
 
-            // Karaoke Vocal Remover DSP
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Rounded.Mic, null, tint = Color(0xFFFF4081), modifier = Modifier.size(18.dp))
-                    Text(if (es) "Modo Karaoke (Quitar voz)" else "Karaoke Vocal Remover", color = Color(0xFFFF4081), fontWeight = FontWeight.Bold)
+            // Karaoke Vocal Remover DSP (shown only when Karaoke [BETA] is enabled in Funciones BETA)
+            if (design.betaKaraokeEnabled) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Rounded.Mic, null, tint = Color(0xFFFF4081), modifier = Modifier.size(18.dp))
+                        Text(if (es) "Modo Karaoke [BETA]" else "Karaoke Vocal Remover [BETA]", color = Color(0xFFFF4081), fontWeight = FontWeight.Bold)
+                    }
+                    Switch(checked = playback.karaokeEnabled, onCheckedChange = onSetKaraokeEnabled)
                 }
-                Switch(checked = playback.karaokeEnabled, onCheckedChange = onSetKaraokeEnabled)
-            }
-            if (playback.karaokeEnabled) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(if (es) "Reducción de voz" else "Vocal Reduction", color = Color.White, fontSize = 12.sp)
-                    Text("${(playback.karaokeStrength * 100).roundToInt()}%", color = Color(0xFFFF4081), fontSize = 12.sp)
+                if (playback.karaokeEnabled) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(if (es) "Reducción de voz" else "Vocal Reduction", color = Color.White, fontSize = 12.sp)
+                        Text("${(playback.karaokeStrength * 100).roundToInt()}%", color = Color(0xFFFF4081), fontSize = 12.sp)
+                    }
+                    Slider(value = playback.karaokeStrength, onValueChange = onSetKaraokeStrength, valueRange = 0.3f..1.0f)
                 }
-                Slider(value = playback.karaokeStrength, onValueChange = onSetKaraokeStrength, valueRange = 0.3f..1.0f)
             }
 
             // 8D Spatial Audio + Reverb Section

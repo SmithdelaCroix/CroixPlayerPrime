@@ -1,24 +1,20 @@
-# Croix Player Prime (`v5.0.0-prime`)
+# Croix Player Prime (`v5.5.0-prime`)
 
-Reproductor de música Android 12+ (`arm64-v8a` — ARMv8 / ARMv9) construido desde cero **100% en español**, con **Estudio de Apariencia Pro** de personalización profunda a 120fps, estética Glassmorphism translúcida, motor multi-cliente sin anuncios, sincronización real de **YouTube Music** y **Spotify**, **Modo Karaoke DSP**, **Integración con IA**, **Modo Misterio 45s**, **Cola Inteligente 3-Modos**, **Carátula 3D Parallax [BETA]** y firma digital permanente.
+Reproductor de música Android 12+ (`arm64-v8a` — ARMv8 / ARMv9) construido desde cero **100% en español**, con **Centro de Cuenta con desenfoque gaussiano**, **cambio de cuentas y canales/perfiles del mismo Gmail**, **sincronización automática completa de YouTube Music**, **cola de reproducción extensa (50–80+ canciones)**, **Favoritos dinámicos con mosaico y cuadrícula visual**, **Estudio de Apariencia Pro** y firma digital permanente.
 
-## Descargar APK Directo (`v5.0.0-prime` — ARM64 Firma Permanente)
+## Descargar APK Directo (`v5.5.0-prime` — ARM64 Firma Permanente)
 
-- **Descarga directa (`v5.0.0-prime`, sin ZIP)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/v5.0.0-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
+- **Descarga directa (`v5.5.0-prime`, sin ZIP)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/v5.5.0-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
 - **Enlace permanente siempre actualizado (`latest-prime`)**: [CroixPlayerPrime-arm64-v8a-signed.apk](https://github.com/SmithdelaCroix/CroixPlayerPrime/releases/download/latest-prime/CroixPlayerPrime-arm64-v8a-signed.apk)
 - **Todas las versiones (GitHub Releases)**: https://github.com/SmithdelaCroix/CroixPlayerPrime/releases
 
-## Novedades Principales (`v5.0.0-prime` — Mega Actualización de Personalización)
-- **Estudio de Apariencia Pro de 8 Pestañas con Vista Previa Interactiva**: *Colores, Cristal, Tipografía, Reproductor, Mini y Nav, Inicio, Letras y Anim., Presets* con tarjeta en vivo donde puedes probar el botón Play y la barra de progreso al instante.
-- **Paleta Rápida de 16 Colores + 12 Temas Predefinidos + Tema Aleatorio al Iniciar**: Selección en 1 toque (*Canción Dinámica, Violeta, Magenta, Carmesí, Coral, Naranja, Oro, Lima Neón, Esmeralda, Turquesa, Cian, Azul Cielo, Índigo, Lavanda, Sakura, Plata Mono*) + 4 nuevos temas (*Sakura Vapor, Ciber Lima, Aurora Nórdica, Estudio Monocromo*) + modo **Tema aleatorio al abrir la app** y botón de restablecimiento.
-- **5 Fondos de Reproductor**: *Carátula Difuminada*, *Gradiente Vivo*, *Aurora Viva* (malla animada de orbes a 120fps), *Oscuro Minimal* y *Negro Puro AMOLED*.
-- **4 Estilos de Botón Play/Pausa**: *Círculo Gradiente*, *Cristal Translúcido*, *Squircle Expresivo* (morfing animado al reproducir/pausar) y *Borde Neón*.
-- **Personalización Total de Carátula**: 5 formas (*Redondeada, Squircle, Cuadrada, Vinilo Circular con centro de disco, Esquinas Cortadas*), control de tamaño/escala, sombra luminosa tintada, modo sin carátula (*Modo Enfoque*), tocar carátula para Play/Pausa, barra de volumen integrada en el reproductor y mantener pantalla encendida.
-- **6 Barras de Progreso**: *Onda, Cápsula, Línea Fina, Ondulada, Segmentada* y *Barra Neón*.
-- **4 Estilos de Mini-Reproductor + Deslizar para Cambiar Canción**: *Cristal Flotante*, *Cápsula Compacta*, *Barra Acoplada* y *AMOLED Negro*, con gesto horizontal para saltar a la canción anterior o siguiente.
-- **Tipografía Global y Navegación**: 4 fuentes globales (*Moderna Sans, Editorial Serif, Técnica Mono, Limpia Compacta*), títulos en 2 líneas, texto deslizante Marquee, barra inferior delgada (*Slim*), textura de grano cristalino (Haze), pestaña de inicio personalizable (*Inicio / Buscar / Favoritos*) y control completo de secciones en Inicio.
-- **4 Animaciones de Letras Sincronizadas**: *Fundido Suave, Escala Viva, Brillo Neón* y *Desplazamiento Karaoke* + espaciado entre líneas y resplandor en línea activa.
-- **Todo lo de `v4.5` y `v4.0`**: Sincronización real de YouTube Music y Spotify, Modo Karaoke DSP, Integración con IA (Gemini/OpenAI), Cola Inteligente 3-Modos, Modo Misterio 45s, Carátula 3D Parallax [BETA], Shazam acústico, Caché LRU, Audio 8D + AutoEq, Discord RPC + Last.fm/ListenBrainz, Recibo PNG, 4 íconos de app y Sesión Privada.
+## Novedades Principales (`v5.5.0-prime`)
+- **Centro de Cuenta con Desenfoque Gaussiano, Multi-Cuenta y Perfiles de Marca**: Tarjeta de perfil con tu foto de avatar y fondo difuminado gaussiano en la parte superior de Configuración; soporte para **cambiar entre distintos canales/perfiles dentro del mismo Gmail** (`accounts_list` + `X-Goog-PageId` / `onBehalfOfUser`) y **guardar/cambiar entre varias cuentas de Google** en 1 toque.
+- **Sincronización Automática Completa de YouTube Music**: Extracción de sesión completa (`SAPISID` + `VISITOR_DATA` + `DATASYNC_ID` + `SESSION_INDEX`) con sincronización automática al iniciar para *Me gusta*, *Historial* y *Playlists*.
+- **Inicio más completo y Selecciones Rápidas basadas en tu cuenta de YT Music**: Tus *Selecciones rápidas* (20 pistas) y estantes personalizados (*Escucha de nuevo*, *Tus Me gusta*, *Mixes diarios*) se alimentan directamente de lo que escuchaste en tu cuenta de YouTube Music, con continuación automática equilibrada.
+- **Cola de Reproducción mucho más extensa**: Cadena automática de continuaciones (`nextRadioContinuationData`) para generar colas de **50–80+ canciones** relacionadas sin duplicados y recarga anticipada automática.
+- **Favoritos Rediseñados (Más Dinámicos)**: Tarjeta hero con mosaico 2×2 y fondo gaussiano, alternador **Cuadrícula Visual / Lista**, filtro de búsqueda instantáneo, orden (*Recientes / A–Z / Artista*) y tarjetas de playlists con mosaico de portadas.
+- **Configuración simplificada y Funciones BETA unificadas**: Nombres cortos y limpios (*Cuenta, Apariencia, Letras, Reproductor, Ecualizador, Almacenamiento, Privacidad, Gestos...*), y **Parallax 3D Giroscopio**, **Modo Misterio `45s ???`** y **Modo Karaoke DSP** agrupados como funciones **BETA desactivadas por defecto**.
 
 ## Licencia
 GPL-3.0

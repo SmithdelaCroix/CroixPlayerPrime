@@ -162,11 +162,33 @@ class InnerTubeClient(
         }
     }
 
-    suspend fun verifyYtMusicAccount(cookie: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun verifyYtMusicAccount(
+        cookie: String,
+        visitorData: String = "",
+        dataSyncId: String = "",
+        pageId: String = "",
+        authUser: String = "0",
+    ): Result<YtMusicAccountProfile> = withContext(Dispatchers.IO) {
         runCatching {
             val auth = SapisidAuthSigner.buildAuthHeader(cookie)
-                ?: error("Missing SAPISID session cookie")
-            val payload = buildWebRemixContext {}
+                ?: error("Falta la cookie SAPISID de sesión")
+            val effectiveSync = pageId.trim().ifBlank { dataSyncId.substringBefore("||").trim() }
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20250401.01.00")
+                        put("hl", localeHl)
+                        put("gl", localeGl)
+                        if (visitorData.isNotBlank()) put("visitorData", visitorData)
+                    }
+                    if (effectiveSync.isNotBlank()) {
+                        putJsonObject("user") {
+                            put("onBehalfOfUser", effectiveSync)
+                        }
+                    }
+                }
+            }
             val respText = http.post("https://music.youtube.com/youtubei/v1/account/account_menu?prettyPrint=false") {
                 contentType(ContentType.Application.Json)
                 header("Origin", "https://music.youtube.com")
@@ -174,6 +196,9 @@ class InnerTubeClient(
                 header("Authorization", auth)
                 header("Cookie", cookie)
                 header("X-Origin", "https://music.youtube.com")
+                header("X-Goog-AuthUser", authUser.filter(Char::isDigit).ifBlank { "0" })
+                if (visitorData.isNotBlank()) header("X-Goog-Visitor-Id", visitorData)
+                if (pageId.isNotBlank()) header("X-Goog-PageId", pageId)
                 header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
                 setBody(payload.toString())
             }.bodyAsText()
@@ -181,23 +206,117 @@ class InnerTubeClient(
             val header = findFirstObjectByKey(root, "activeAccountHeaderRenderer")
             val accountName = header?.get("accountName")?.let(::extractColumnText).orEmpty().ifBlank {
                 header?.get("channelHandle")?.let(::extractColumnText).orEmpty()
-            }.ifBlank { "YouTube Music Account" }
-            accountName
+            }.ifBlank { "Cuenta YouTube Music" }
+            val email = header?.get("email")?.let(::extractColumnText).orEmpty()
+            val handle = header?.get("channelHandle")?.let(::extractColumnText).orEmpty()
+            val rawPhoto = extractBestThumbnail(header?.get("accountPhoto"))
+            val avatar = if (rawPhoto.isNotBlank()) {
+                rawPhoto.replace(Regex("=s\\d+"), "=s256").replace(Regex("=w\\d+-h\\d+"), "=w256-h256")
+            } else ""
+            YtMusicAccountProfile(
+                name = accountName,
+                email = email,
+                channelHandle = handle,
+                avatarUrl = avatar,
+                pageId = pageId,
+                dataSyncId = dataSyncId,
+                authUser = authUser.filter(Char::isDigit).ifBlank { "0" },
+                isSelected = true,
+            )
         }
     }
 
     /**
-     * Real YouTube Music Account Library Synchronization:
-     * Fetches the user's real Liked Songs (FEmusic_liked_videos), Listening History (FEmusic_history),
-     * and Saved Playlists (FEmusic_liked_playlists) using their authenticated SAPISID session.
+     * Metrolist-style YouTube Brand Account / Multi-Channel Discovery:
+     * Calls `www.youtube.com/youtubei/v1/account/accounts_list` (WEB client) so ALL channels/profiles
+     * under the same Google account are returned (pageId, dataSyncId, avatarUrl, handle).
+     */
+    suspend fun fetchYtMusicBrandProfiles(
+        cookie: String = serverConfig.ytMusicCookie,
+        visitorData: String = serverConfig.ytMusicVisitorData,
+        authUser: String = serverConfig.ytMusicAuthUser,
+    ): Result<List<YtMusicAccountProfile>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val auth = SapisidAuthSigner.buildAuthHeader(cookie, origin = "https://www.youtube.com")
+                ?: error("Sin sesión activa de YouTube")
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", "WEB")
+                        put("clientVersion", "2.20250401.01.00")
+                        put("hl", localeHl)
+                        put("gl", localeGl)
+                        if (visitorData.isNotBlank()) put("visitorData", visitorData)
+                    }
+                }
+                put("accountReadMask", buildJsonObject {
+                    put("returnOwner", true)
+                    put("returnBrandAccounts", true)
+                })
+            }
+            val respText = http.post("https://www.youtube.com/youtubei/v1/account/accounts_list?prettyPrint=false") {
+                contentType(ContentType.Application.Json)
+                header("Origin", "https://www.youtube.com")
+                header("Referer", "https://www.youtube.com/")
+                header("X-Origin", "https://www.youtube.com")
+                header("Authorization", auth)
+                header("Cookie", cookie)
+                header("X-Goog-AuthUser", authUser.filter(Char::isDigit).ifBlank { "0" })
+                if (visitorData.isNotBlank()) header("X-Goog-Visitor-Id", visitorData)
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
+                setBody(payload.toString())
+            }.bodyAsText()
+            val root = json.parseToJsonElement(respText).jsonObject
+            val parsed = mutableListOf<YtMusicAccountProfile>()
+            val items = findAllObjectsByKey(root, "accountItem") + findAllObjectsByKey(root, "accountItemRenderer")
+            items.forEach { item ->
+                val name = item["accountName"]?.let(::extractColumnText).orEmpty().ifBlank {
+                    item["channelHandle"]?.let(::extractColumnText).orEmpty()
+                }
+                if (name.isBlank()) return@forEach
+                val handle = item["channelHandle"]?.let(::extractColumnText).orEmpty()
+                val byline = item["accountByline"]?.let(::extractColumnText).orEmpty()
+                val rawPhoto = extractBestThumbnail(item["accountPhoto"])
+                val avatar = if (rawPhoto.isNotBlank()) {
+                    rawPhoto.replace(Regex("=s\\d+"), "=s256").replace(Regex("=w\\d+-h\\d+"), "=w256-h256")
+                } else ""
+                val isSel = item["isSelected"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
+                val selectEp = findFirstObjectByKey(item, "selectActiveIdentityEndpoint")
+                val tokens = selectEp?.get("supportedTokens")?.jsonArray.orEmpty()
+                var pageId = ""
+                var dsId = ""
+                tokens.forEach { tok ->
+                    val obj = tok as? JsonObject ?: return@forEach
+                    obj["pageIdToken"]?.jsonObject?.get("pageId")?.jsonPrimitive?.contentOrNull?.let { if (it.isNotBlank()) pageId = it }
+                    obj["datasyncIdToken"]?.jsonObject?.get("datasyncIdToken")?.jsonPrimitive?.contentOrNull?.let { if (it.isNotBlank()) dsId = it }
+                }
+                parsed += YtMusicAccountProfile(
+                    name = name,
+                    channelHandle = handle,
+                    byline = byline,
+                    avatarUrl = avatar,
+                    pageId = pageId,
+                    dataSyncId = dsId.substringBefore("||").trim(),
+                    authUser = authUser.filter(Char::isDigit).ifBlank { "0" },
+                    isSelected = isSel,
+                )
+            }
+            parsed.distinctBy { it.profileKey }
+        }
+    }
+
+    /**
+     * Real YouTube Music Account Library Synchronization (Metrolist-grade):
+     * Fetches Liked Songs (FEmusic_liked_videos), Listening History (FEmusic_history),
+     * and Saved Playlists (FEmusic_liked_playlists) using the active Brand Profile / Account session.
      */
     suspend fun syncYtMusicAccountLibrary(): Result<YtMusicLibrarySyncSnapshot> = withContext(Dispatchers.IO) {
         if (!serverConfig.hasYtMusicAccount) {
             return@withContext Result.failure(IllegalStateException("Conecta tu cuenta de YouTube Music primero"))
         }
         runCatching {
-            val liked = fetchAuthenticatedTrackFeed("FEmusic_liked_videos", limit = 60)
-            val history = fetchAuthenticatedTrackFeed("FEmusic_history", limit = 50)
+            val liked = fetchAuthenticatedTrackFeed("FEmusic_liked_videos", limit = 100)
+            val history = fetchAuthenticatedTrackFeed("FEmusic_history", limit = 80)
             val playlists = fetchAuthenticatedPlaylists()
             YtMusicLibrarySyncSnapshot(
                 likedSongs = liked,
@@ -211,7 +330,7 @@ class InnerTubeClient(
     suspend fun fetchYtMusicPlaylistTracks(browseId: String): Result<List<Track>> = withContext(Dispatchers.IO) {
         runCatching {
             val normalizedId = if (browseId.startsWith("VL") || browseId.startsWith("FE")) browseId else "VL$browseId"
-            val tracks = fetchAuthenticatedTrackFeed(normalizedId, limit = 80)
+            val tracks = fetchAuthenticatedTrackFeed(normalizedId, limit = 100)
             if (tracks.isEmpty()) error("No se encontraron pistas en esta playlist de YT Music")
             tracks
         }
@@ -223,7 +342,20 @@ class InnerTubeClient(
         }
         val raw = postInnerTube("browse", payload)
         val root = json.parseToJsonElement(raw).jsonObject
-        extractTracksFromTree(root).distinctBy { it.id }.take(limit)
+        val collected = extractTracksFromTree(root).toMutableList()
+        // Follow 1 continuation page when needed for deeper Liked / History sync
+        if (collected.size < limit) {
+            val token = findFirstContinuationToken(root)
+            if (!token.isNullOrBlank()) {
+                runCatching {
+                    val contPayload = buildWebRemixContext { put("continuation", token) }
+                    val contRaw = postInnerTube("browse", contPayload)
+                    val contRoot = json.parseToJsonElement(contRaw).jsonObject
+                    collected += extractTracksFromTree(contRoot)
+                }
+            }
+        }
+        collected.distinctBy { it.id }.take(limit)
     }.getOrElse { emptyList() }
 
     private suspend fun fetchAuthenticatedPlaylists(): List<YtMusicPlaylistSummary> = runCatching {
@@ -271,16 +403,28 @@ class InnerTubeClient(
             val raw = postInnerTube("browse", payload)
             val root = json.parseToJsonElement(raw).jsonObject
             parseHomeShelves(root, sections)
+
+            // Follow 1 continuation page for a richer (yet well-balanced) YT Music home feed!
+            val contToken = findFirstContinuationToken(root)
+            if (!contToken.isNullOrBlank() && sections.size < 6) {
+                runCatching {
+                    val contPayload = buildWebRemixContext {
+                        put("continuation", contToken)
+                    }
+                    val contRaw = postInnerTube("browse", contPayload)
+                    val contRoot = json.parseToJsonElement(contRaw).jsonObject
+                    parseHomeShelves(contRoot, sections)
+                }
+            }
         }
 
         if (sections.isEmpty()) {
-            // Reliable fallback via curated YT Music searches so Home is never empty
-            val quick = searchSongs("exitos musicales populares 2026", limit = 16)
-            val chill = searchSongs("chill electronic pop hits", limit = 12)
+            val quick = searchSongs("exitos musicales populares 2026", limit = 18)
+            val chill = searchSongs("chill electronic pop hits", limit = 14)
             if (quick.isNotEmpty()) sections += HomeSection("Éxitos del momento", quick)
             if (chill.isNotEmpty()) sections += HomeSection("Mezcla en tendencia", chill)
         }
-        sections
+        sections.distinctBy { it.title }.take(8)
     }
 
     suspend fun searchSongs(query: String, limit: Int = 25): List<Track> = withContext(Dispatchers.IO) {
@@ -626,17 +770,53 @@ class InnerTubeClient(
             .replace(Regex("=s\\d+"), "=s1080")
     }
 
-    suspend fun fetchRadioQueue(videoId: String, limit: Int = 20): List<Track> = withContext(Dispatchers.IO) {
+    /**
+     * Deep extensive radio queue builder: chains up to 2 continuation pages so the playback
+     * queue immediately offers 50-70+ related tracks instead of a tiny 20-track list.
+     */
+    suspend fun fetchRadioQueue(videoId: String, limit: Int = 60): List<Track> = withContext(Dispatchers.IO) {
         runCatching {
+            val playlistId = "RDAMVM$videoId"
             val payload = buildWebRemixContext {
                 put("videoId", videoId)
-                put("playlistId", "RDAMVM$videoId")
+                put("playlistId", playlistId)
                 put("isAudioOnly", true)
             }
             val raw = postInnerTube("next", payload)
-            val root = json.parseToJsonElement(raw).jsonObject
-            extractPlaylistPanelTracks(root).distinctBy { it.id }.take(limit)
+            var root = json.parseToJsonElement(raw).jsonObject
+            val collected = extractPlaylistPanelTracks(root).toMutableList()
+            val seenTokens = mutableSetOf<String>()
+
+            var page = 0
+            while (collected.distinctBy { it.id }.size < limit && page < 2) {
+                val token = findFirstContinuationToken(root) ?: break
+                if (!seenTokens.add(token)) break
+                val contPayload = buildWebRemixContext {
+                    put("continuation", token)
+                    put("playlistId", playlistId)
+                    put("isAudioOnly", true)
+                }
+                val contRaw = runCatching { postInnerTube("next", contPayload) }.getOrNull() ?: break
+                root = runCatching { json.parseToJsonElement(contRaw).jsonObject }.getOrNull() ?: break
+                val more = extractPlaylistPanelTracks(root)
+                if (more.isEmpty()) break
+                collected += more
+                page++
+            }
+            collected.distinctBy { it.id }.take(limit)
         }.getOrElse { emptyList() }
+    }
+
+    private fun findFirstContinuationToken(el: JsonElement): String? = when (el) {
+        is JsonObject -> {
+            val direct = el["nextRadioContinuationData"]?.jsonObject?.get("continuation")?.jsonPrimitive?.contentOrNull
+                ?: el["nextContinuationData"]?.jsonObject?.get("continuation")?.jsonPrimitive?.contentOrNull
+                ?: el["continuationCommand"]?.jsonObject?.get("token")?.jsonPrimitive?.contentOrNull
+            if (!direct.isNullOrBlank()) direct
+            else el.values.firstNotNullOfOrNull(::findFirstContinuationToken)
+        }
+        is JsonArray -> el.firstNotNullOfOrNull(::findFirstContinuationToken)
+        else -> null
     }
 
     /**
@@ -1049,32 +1229,48 @@ class InnerTubeClient(
         } else {
             null
         }
+        val visitor = cfg.ytMusicVisitorData.ifBlank { cachedVisitorData.orEmpty() }
         return http.post("https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false") {
             contentType(ContentType.Application.Json)
             header("Origin", "https://music.youtube.com")
             header("Referer", "https://music.youtube.com/")
             header("X-Origin", "https://music.youtube.com")
+            if (visitor.isNotBlank()) header("X-Goog-Visitor-Id", visitor)
             if (authHeader != null) {
                 header("Authorization", authHeader)
                 header("Cookie", cfg.ytMusicCookie)
+                header("X-Goog-AuthUser", cfg.ytMusicAuthUser.filter(Char::isDigit).ifBlank { "0" })
+                if (cfg.ytMusicPageId.isNotBlank()) {
+                    header("X-Goog-PageId", cfg.ytMusicPageId)
+                }
             }
             header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
             setBody(body.toString())
         }.bodyAsText()
     }
 
-    private fun buildWebRemixContext(extra: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit): JsonObject =
-        buildJsonObject {
+    private fun buildWebRemixContext(extra: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit): JsonObject {
+        val cfg = serverConfig
+        val visitor = cfg.ytMusicVisitorData.ifBlank { cachedVisitorData.orEmpty() }
+        val onBehalf = cfg.effectiveOnBehalfOfUser
+        return buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
                     put("clientName", "WEB_REMIX")
                     put("clientVersion", "1.20250401.01.00")
                     put("hl", localeHl)
                     put("gl", localeGl)
+                    if (visitor.isNotBlank()) put("visitorData", visitor)
+                }
+                if (cfg.hasYtMusicAccount && onBehalf.isNotBlank()) {
+                    putJsonObject("user") {
+                        put("onBehalfOfUser", onBehalf)
+                    }
                 }
             }
             extra()
         }
+    }
 
     private fun parseHomeShelves(root: JsonObject, out: MutableList<HomeSection>) {
         val blockAds = serverConfig.strictAdBlockEnabled

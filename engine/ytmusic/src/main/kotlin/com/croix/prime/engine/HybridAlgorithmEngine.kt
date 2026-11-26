@@ -63,6 +63,8 @@ class HybridAlgorithmEngine(
         blendWeight: Float,
         isSpanish: Boolean,
         blockedArtistKeys: Set<String> = emptySet(),
+        ytMusicHistory: List<Track> = emptyList(),
+        ytMusicLiked: List<Track> = emptyList(),
     ): HomeFeedBundle = withContext(Dispatchers.IO) {
         val weight = blendWeight.coerceIn(0f, 1f)
         val now = System.currentTimeMillis()
@@ -74,7 +76,9 @@ class HybridAlgorithmEngine(
             val allowed = sec.tracks.filterAllowed()
             if (allowed.isEmpty()) null else sec.copy(tracks = allowed)
         }
-        val cleanFavorites = localFavorites.filterAllowed()
+        val cleanYtHistory = ytMusicHistory.filterAllowed()
+        val cleanYtLiked = ytMusicLiked.filterAllowed()
+        val cleanFavorites = (cleanYtLiked + localFavorites.filterAllowed()).distinctBy { it.id }
         val cleanHistoryRecords = localHistoryRecords.filterNot { isBlockedArtist(it.track.artist, blockedArtistKeys) }
 
         // 1. Score local tracks & artists with recency decay (plays in last 7 days count extra)
@@ -85,7 +89,7 @@ class HybridAlgorithmEngine(
             rec.track to (rec.playCount * (0.6 + recencyFactor) + isFavBonus)
         }.sortedByDescending { it.second }
 
-        val topLocalTracks = (scoredTracks.map { it.first } + cleanFavorites).distinctBy { it.id }
+        val topLocalTracks = (cleanYtHistory + scoredTracks.map { it.first } + cleanFavorites).distinctBy { it.id }
         val forgottenGems = cleanHistoryRecords
             .filter { (now - it.playedAtMs) > 5L * 86_400_000L && it.playCount >= 2 }
             .sortedByDescending { it.playCount }
@@ -93,6 +97,12 @@ class HybridAlgorithmEngine(
             .take(6)
 
         val localArtistRankings = buildMap<String, Double> {
+            cleanYtHistory.take(25).forEachIndexed { idx, t ->
+                val mainArtist = primaryArtistName(t.artist)
+                if (mainArtist.isNotBlank() && !mainArtist.equals("Unknown Artist", true) && !isBlockedArtist(mainArtist, blockedArtistKeys)) {
+                    put(mainArtist, (get(mainArtist) ?: 0.0) + (3.2 - idx * 0.08).coerceAtLeast(0.8))
+                }
+            }
             scoredTracks.forEach { (t, score) ->
                 val mainArtist = primaryArtistName(t.artist)
                 if (mainArtist.isNotBlank() && !mainArtist.equals("Unknown Artist", true) && !isBlockedArtist(mainArtist, blockedArtistKeys)) {
@@ -109,22 +119,23 @@ class HybridAlgorithmEngine(
 
         val hasSpotify = spotifyTaste != null && spotifyTaste.connected &&
             (spotifyTaste.allSeedTracks.isNotEmpty() || spotifyTaste.allSeedArtistNames.isNotEmpty())
+        val hasYtAccountTaste = cleanYtHistory.isNotEmpty() || cleanYtLiked.isNotEmpty()
 
-        // 2. Gather top seed artists combining Spotify + Local + YT Home
+        // 2. Gather top seed artists combining YT Music History + Spotify + Local + YT Home
         val ytFallbackArtists = cleanYtSections.flatMap { it.tracks }
             .map { primaryArtistName(it.artist) }
             .filter { it.isNotBlank() && !it.equals("Unknown Artist", true) && !it.equals("YouTube Music", true) && !isBlockedArtist(it, blockedArtistKeys) }
             .distinct()
 
         val combinedArtistNames = buildList {
-            if (hasSpotify && weight > 0.1f) {
-                addAll(spotifyTaste!!.allSeedArtistNames.filterNot { isBlockedArtist(it, blockedArtistKeys) }.take(6))
-            }
             addAll(localArtistRankings.take(6))
+            if (hasSpotify && weight > 0.1f) {
+                addAll(spotifyTaste!!.allSeedArtistNames.filterNot { isBlockedArtist(it, blockedArtistKeys) }.take(5))
+            }
             addAll(ytFallbackArtists.take(6))
-        }.distinctBy { it.lowercase() }.take(8)
+        }.distinctBy { it.lowercase() }.take(10)
 
-        // 3. Run parallel discovery calls for Quick Picks, Daily Mixes & Spotify matching
+        // 3. Run parallel discovery calls for Quick Picks (YT Music history-driven!), Daily Mixes & Spotify
         val matchedSpotifyTracks = if (hasSpotify && weight > 0.05f) {
             val seeds = spotifyTaste!!.allSeedTracks.filterNot { isBlockedArtist(it.artist, blockedArtistKeys) }.shuffled().take(10)
             matchSpotifyTracksToYtMusic(seeds, maxTracks = 10).filterAllowed()
@@ -132,30 +143,47 @@ class HybridAlgorithmEngine(
             emptyList()
         }
 
-        val quickPickSeedA = matchedSpotifyTracks.firstOrNull() ?: topLocalTracks.firstOrNull() ?: cleanYtSections.firstOrNull()?.tracks?.firstOrNull()
-        val quickPickSeedB = topLocalTracks.drop(1).firstOrNull() ?: cleanYtSections.getOrNull(1)?.tracks?.firstOrNull()
+        val quickPickSeedA = cleanYtHistory.firstOrNull()
+            ?: cleanYtLiked.firstOrNull()
+            ?: matchedSpotifyTracks.firstOrNull()
+            ?: topLocalTracks.firstOrNull()
+            ?: cleanYtSections.firstOrNull()?.tracks?.firstOrNull()
+        val quickPickSeedB = cleanYtHistory.drop(2).firstOrNull()
+            ?: cleanYtLiked.drop(1).firstOrNull()
+            ?: topLocalTracks.drop(1).firstOrNull()
+            ?: cleanYtSections.getOrNull(1)?.tracks?.firstOrNull()
 
         val (radioA, radioB, mixTracksByArtist) = coroutineScope {
-            val rA = async { quickPickSeedA?.let { innerTube.fetchRadioQueue(it.id, limit = 14) }.orEmpty().filterAllowed() }
-            val rB = async { quickPickSeedB?.let { innerTube.fetchRadioQueue(it.id, limit = 10) }.orEmpty().filterAllowed() }
-            val mixArtists = combinedArtistNames.take(3)
+            val rA = async { quickPickSeedA?.let { innerTube.fetchRadioQueue(it.id, limit = 18) }.orEmpty().filterAllowed() }
+            val rB = async { quickPickSeedB?.let { innerTube.fetchRadioQueue(it.id, limit = 14) }.orEmpty().filterAllowed() }
+            val mixArtists = combinedArtistNames.take(4)
             val mDefs = mixArtists.map { artist ->
                 async {
-                    val found = innerTube.searchSongs("$artist top hits", limit = 10).filterAllowed()
-                    val extra = found.firstOrNull()?.let { innerTube.fetchRadioQueue(it.id, limit = 8) }.orEmpty().filterAllowed()
-                    artist to (found + extra).distinctBy { it.id }.take(15)
+                    val found = innerTube.searchSongs("$artist top hits", limit = 12).filterAllowed()
+                    val extra = found.firstOrNull()?.let { innerTube.fetchRadioQueue(it.id, limit = 12) }.orEmpty().filterAllowed()
+                    artist to (found + extra).distinctBy { it.id }.take(18)
                 }
             }
             Triple(rA.await(), rB.await(), mDefs.awaitAll())
         }
 
-        // 4. Build Quick Picks (16 dense high-affinity tracks for 4-row horizontal pager)
-        val quickPicks = interleaveByWeight(
-            primary = (matchedSpotifyTracks + forgottenGems + topLocalTracks.take(4)).distinctBy { it.id },
-            secondary = (radioA + radioB + cleanYtSections.firstOrNull()?.tracks.orEmpty()).distinctBy { it.id },
-            primaryWeight = if (hasSpotify) weight.coerceIn(0.3f, 0.85f) else 0.4f,
-            limit = 16,
-        )
+        // 4. Build Quick Picks (20 dense tracks driven directly by YT Music listening history + related radio!)
+        val ytPrimaryQuickPicks = (cleanYtHistory.take(10) + cleanYtLiked.take(6) + forgottenGems + topLocalTracks.take(4)).distinctBy { it.id }
+        val quickPicks = if (hasYtAccountTaste) {
+            interleaveByWeight(
+                primary = ytPrimaryQuickPicks,
+                secondary = (radioA + radioB + matchedSpotifyTracks + cleanYtSections.firstOrNull()?.tracks.orEmpty()).distinctBy { it.id },
+                primaryWeight = 0.62f,
+                limit = 20,
+            )
+        } else {
+            interleaveByWeight(
+                primary = (matchedSpotifyTracks + forgottenGems + topLocalTracks.take(4)).distinctBy { it.id },
+                secondary = (radioA + radioB + cleanYtSections.firstOrNull()?.tracks.orEmpty()).distinctBy { it.id },
+                primaryWeight = if (hasSpotify) weight.coerceIn(0.3f, 0.85f) else 0.45f,
+                limit = 20,
+            )
+        }
 
         // 5. Build Editorial Daily Mixes ("Hecho para ti" poster cards)
         val mixGradients = listOf(
@@ -234,15 +262,27 @@ class HybridAlgorithmEngine(
             )
         }
 
-        // 7. Build Personalized Shelves + Clean YT Music Shelves
+        // 7. Build Personalized Shelves + Clean YT Music Shelves (moderately richer & well-balanced!)
         val personalizedShelves = mutableListOf<HomeSection>()
-        mixTracksByArtist.firstOrNull()?.let { (artist, tracks) ->
+        if (cleanYtHistory.size >= 3) {
+            personalizedShelves += HomeSection(
+                title = if (isSpanish) "Escucha de nuevo (Tu YT Music)" else "Listen again (Your YT Music)",
+                tracks = cleanYtHistory.take(18),
+            )
+        }
+        mixTracksByArtist.take(2).forEach { (artist, tracks) ->
             if (tracks.isNotEmpty()) {
                 personalizedShelves += HomeSection(
                     title = if (isSpanish) "Porque escuchaste a $artist" else "Because you listen to $artist",
                     tracks = tracks,
                 )
             }
+        }
+        if (cleanYtLiked.size >= 4) {
+            personalizedShelves += HomeSection(
+                title = if (isSpanish) "Tus Me gusta de YouTube Music" else "Your YouTube Music Likes",
+                tracks = cleanYtLiked.take(18),
+            )
         }
         if (hasSpotify && matchedSpotifyTracks.isNotEmpty()) {
             personalizedShelves += HomeSection(
@@ -251,7 +291,7 @@ class HybridAlgorithmEngine(
             )
         }
 
-        val finalShelves = (personalizedShelves + cleanYtSections).distinctBy { it.title }
+        val finalShelves = (personalizedShelves + cleanYtSections).distinctBy { it.title }.take(8)
         HomeFeedBundle(
             quickPicks = quickPicks,
             dailyMixes = dailyMixes,
@@ -274,15 +314,15 @@ class HybridAlgorithmEngine(
             filter { it.id !in excludeIds && !isBlockedArtist(it.artist, blockedArtistKeys) }
 
         if (!moodQuery.isNullOrBlank()) {
-            val moodTracks = innerTube.searchSongs(moodQuery, limit = 18).clean()
-            val extra = moodTracks.firstOrNull()?.let { innerTube.fetchRadioQueue(it.id, limit = 12) }.orEmpty().clean()
-            return@withContext (moodTracks + extra).distinctBy { it.id }.take(25)
+            val moodTracks = innerTube.searchSongs(moodQuery, limit = 25).clean()
+            val extra = moodTracks.firstOrNull()?.let { innerTube.fetchRadioQueue(it.id, limit = 45) }.orEmpty().clean()
+            return@withContext (moodTracks + extra).distinctBy { it.id }.take(60)
         }
 
         val weight = blendWeight.coerceIn(0f, 1f)
         val spotifyMatched = if (spotifyTaste != null && spotifyTaste.connected && weight > 0.1f) {
-            val seeds = spotifyTaste.allSeedTracks.filterNot { isBlockedArtist(it.artist, blockedArtistKeys) }.shuffled().take(6)
-            matchSpotifyTracksToYtMusic(seeds, maxTracks = 6).clean()
+            val seeds = spotifyTaste.allSeedTracks.filterNot { isBlockedArtist(it.artist, blockedArtistKeys) }.shuffled().take(8)
+            matchSpotifyTracksToYtMusic(seeds, maxTracks = 8).clean()
         } else {
             emptyList()
         }
@@ -293,16 +333,16 @@ class HybridAlgorithmEngine(
             ?: fallbackTracks.clean().firstOrNull()
 
         val radio = if (anchor != null) {
-            innerTube.fetchRadioQueue(anchor.id, limit = 20).clean()
+            innerTube.fetchRadioQueue(anchor.id, limit = 55).clean()
         } else {
-            innerTube.searchSongs("top global music hits", limit = 18).clean()
+            innerTube.searchSongs("top global music hits", limit = 25).clean()
         }
 
         interleaveByWeight(
             primary = spotifyMatched,
-            secondary = (radio + localFavorites.clean().shuffled().take(6)).distinctBy { it.id },
+            secondary = (radio + localFavorites.clean().shuffled().take(10)).distinctBy { it.id },
             primaryWeight = weight.coerceAtLeast(0.35f),
-            limit = 25,
+            limit = 60,
         )
     }
 
@@ -422,7 +462,7 @@ class HybridAlgorithmEngine(
             familiarHistory: List<Track>,
             discoveryPool: List<Track>,
             blockedArtistKeys: Set<String> = emptySet(),
-            limit: Int = 27,
+            limit: Int = 54,
         ): List<Track> {
             val out = mutableListOf(currentTrack)
             val used = mutableListOf(currentTrack)

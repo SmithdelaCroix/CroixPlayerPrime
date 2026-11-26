@@ -282,11 +282,13 @@ data class CroixDesignState(
     val transitionSpeed: Float = 1.0f,
     val crossfadeSeconds: Int = 0,
     val languageMode: PrimeLanguageMode = PrimeLanguageMode.SPANISH,
-    // v4.0 / v4.5 Prime Pro Features
+    // v4.0 / v4.5 / v5.5 Prime Pro & BETA Features (All BETA features OFF by default!)
     val audioCacheLimitMb: Int = 512,
     val canvasMotionEnabled: Boolean = true,
     val artworkParallax3d: Boolean = false,
     val parallax3dIntensity: Float = 1.35f,
+    val betaBlindDiscoveryEnabled: Boolean = false,
+    val betaKaraokeEnabled: Boolean = false,
     val privateSessionEnabled: Boolean = false,
     val appIconId: String = "violet",
     val autoOutputProfilesEnabled: Boolean = true,
@@ -642,6 +644,9 @@ class CroixDesignRepository(private val context: Context) {
                     bluetoothAutoEqPreset = existing.bluetoothAutoEqPreset,
                     wiredAutoEqPreset = existing.wiredAutoEqPreset,
                     speakerAutoEqPreset = existing.speakerAutoEqPreset,
+                    betaBlindDiscoveryEnabled = existing.betaBlindDiscoveryEnabled,
+                    betaKaraokeEnabled = existing.betaKaraokeEnabled,
+                    artworkParallax3d = existing.artworkParallax3d,
                 ).clamped()
             } else {
                 preset.clamped()

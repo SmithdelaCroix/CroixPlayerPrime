@@ -13,8 +13,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.croix.prime.engine.AiApiConfig
 import com.croix.prime.engine.ExternalIntegrationsConfig
+import com.croix.prime.engine.SavedYtMusicAccount
 import com.croix.prime.engine.ServerConnectionConfig
 import com.croix.prime.engine.SpotifyTasteSnapshot
+import com.croix.prime.engine.Track
+import com.croix.prime.engine.YtMusicAccountProfile
 import com.croix.prime.engine.YtMusicPlaylistSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -34,7 +37,12 @@ data class ServerSessionState(
     val integrations: ExternalIntegrationsConfig = ExternalIntegrationsConfig(),
     val aiConfig: AiApiConfig = AiApiConfig(),
     val ytMusicPlaylists: List<YtMusicPlaylistSummary> = emptyList(),
+    val ytMusicHistoryTracks: List<Track> = emptyList(),
+    val ytMusicLikedTracks: List<Track> = emptyList(),
+    val ytMusicBrandProfiles: List<YtMusicAccountProfile> = emptyList(),
+    val savedYtAccounts: List<SavedYtMusicAccount> = emptyList(),
     val ytMusicSyncSummary: String = "",
+    val ytMusicLastSyncMs: Long = 0L,
 ) {
     val isSpotifyConnected: Boolean get() = spotifySpDc.isNotBlank() && spotifyTaste.connected
     val isYtMusicConnected: Boolean get() = serverConfig.hasYtMusicAccount

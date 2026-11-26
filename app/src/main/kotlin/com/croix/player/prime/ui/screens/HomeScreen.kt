@@ -91,6 +91,7 @@ fun HomeScreen(
     recentTracks: List<Track>,
     moods: List<MoodChip>,
     favoriteIds: Set<String>,
+    ytMusicConnected: Boolean,
     spotifyConnected: Boolean,
     aiReady: Boolean,
     aiCurator: AiCuratorUiState,
@@ -456,45 +457,47 @@ fun HomeScreen(
                     }
                 }
 
-                CroixGlassCard(
-                    modifier = Modifier.weight(1f),
-                    accentTint = Color(0xFFFF4081),
-                    onClick = { if (!blindDiscoveryLoading) onStartBlindDiscovery() },
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(Color(0xFFFF4081).copy(alpha = 0.28f), Color(0xFF7C4DFF).copy(alpha = 0.16f)),
-                                ),
-                            )
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                if (design.betaBlindDiscoveryEnabled) {
+                    CroixGlassCard(
+                        modifier = Modifier.weight(1f),
+                        accentTint = Color(0xFFFF4081),
+                        onClick = { if (!blindDiscoveryLoading) onStartBlindDiscovery() },
                     ) {
-                        Box(
-                            modifier = Modifier.size(38.dp).clip(CircleShape).background(Color(0xFFFF4081).copy(alpha = 0.24f)),
-                            contentAlignment = Alignment.Center,
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color(0xFFFF4081).copy(alpha = 0.28f), Color(0xFF7C4DFF).copy(alpha = 0.16f)),
+                                    ),
+                                )
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            if (blindDiscoveryLoading) {
-                                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                            } else {
-                                Icon(Icons.Rounded.QuestionMark, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                            Box(
+                                modifier = Modifier.size(38.dp).clip(CircleShape).background(Color(0xFFFF4081).copy(alpha = 0.24f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (blindDiscoveryLoading) {
+                                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                                } else {
+                                    Icon(Icons.Rounded.QuestionMark, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                                }
                             }
+                            Text(
+                                text = if (strings.isSpanish) "Modo Misterio ???" else "Blind Mode ???",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                maxLines = 1,
+                            )
+                            Text(
+                                text = if (strings.isSpanish) "45s ocultos y revelación progresiva [BETA]" else "45s blurred, then gradual reveal [BETA]",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = palette.textSecondary,
+                                maxLines = 2,
+                            )
                         }
-                        Text(
-                            text = if (strings.isSpanish) "Modo Misterio ???" else "Blind Mode ???",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            maxLines = 1,
-                        )
-                        Text(
-                            text = if (strings.isSpanish) "45s ocultos y revelación progresiva" else "45s blurred, then gradual reveal",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = palette.textSecondary,
-                            maxLines = 2,
-                        )
                     }
                 }
             }
@@ -733,7 +736,12 @@ fun HomeScreen(
                                 color = Color.White,
                             )
                             Text(
-                                text = if (strings.isSpanish) "Inicia una radio instantánea desde cualquier tema" else "Start an instant mix from any track",
+                                text = when {
+                                    ytMusicConnected && strings.isSpanish -> "Basado en tu historial de YouTube Music"
+                                    ytMusicConnected -> "Based on your YouTube Music history"
+                                    strings.isSpanish -> "Inicia una radio instantánea desde cualquier tema"
+                                    else -> "Start an instant mix from any track"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = palette.textSecondary,
                             )

@@ -12,6 +12,7 @@ import android.os.Message
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -213,21 +214,38 @@ fun SpotifyLoginOverlay(
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
+private class CroixYtAuthBridge(
+    private val onTokens: (visitorData: String, dataSyncId: String, authUser: String) -> Unit,
+) {
+    @JavascriptInterface
+    fun onAuthMeta(visitorData: String?, dataSyncId: String?, authUser: String?) {
+        val v = visitorData?.takeUnless { it == "null" || it == "undefined" }.orEmpty()
+        val d = dataSyncId?.takeUnless { it == "null" || it == "undefined" }.orEmpty().substringBefore("||").trim()
+        val a = authUser?.takeUnless { it == "null" || it == "undefined" }.orEmpty().filter(Char::isDigit).ifBlank { "0" }
+        onTokens(v, d, a)
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility", "JavascriptInterface")
 @Composable
 fun YtMusicLoginOverlay(
+    isAddingAnotherAccount: Boolean = false,
     onDismiss: () -> Unit,
-    onCookieCaptured: (cookie: String) -> Unit,
+    onAuthCaptured: (cookie: String, visitorData: String, dataSyncId: String, authUser: String) -> Unit,
 ) {
     val palette = LocalCroixPalette.current
     val strings = LocalCroixStrings.current
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var captured by remember { mutableStateOf(false) }
     var manualCookie by remember { mutableStateOf("") }
+    var latestVisitor by remember { mutableStateOf("") }
+    var latestDataSyncId by remember { mutableStateOf("") }
+    var latestAuthUser by remember { mutableStateOf("0") }
     val blocker = remember { MutableInteractionSource() }
 
     DisposableEffect(Unit) {
         onDispose {
+            webViewRef?.removeJavascriptInterface("CroixAuth")
             webViewRef?.destroyCleanly()
             webViewRef = null
         }
@@ -258,9 +276,13 @@ fun YtMusicLoginOverlay(
                 }
             }
             Column {
-                Text(strings.connectYtMusic, style = MaterialTheme.typography.titleLarge, color = Color.White)
                 Text(
-                    if (strings.isSpanish) "Sincroniza tus Me gusta, Playlists e Historial reales" else "Sync your real Liked Songs, Playlists & History",
+                    if (isAddingAnotherAccount) "Añadir otra cuenta" else strings.connectYtMusic,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                )
+                Text(
+                    if (strings.isSpanish) "Sincronización automática completa + perfiles y canales" else "Full auto-sync + multi-profile support",
                     style = MaterialTheme.typography.bodySmall,
                     color = palette.textSecondary,
                 )
@@ -286,7 +308,7 @@ fun YtMusicLoginOverlay(
                 onClick = {
                     if (!captured && manualCookie.isNotBlank()) {
                         captured = true
-                        onCookieCaptured(manualCookie.trim())
+                        onAuthCaptured(manualCookie.trim(), "", "", "0")
                     }
                 },
             ) { Text("OK") }
@@ -301,12 +323,26 @@ fun YtMusicLoginOverlay(
                     cm.removeAllCookies(null)
                     cm.flush()
 
+                    val bridge = CroixYtAuthBridge { v, d, a ->
+                        if (v.isNotBlank()) latestVisitor = v
+                        if (d.isNotBlank()) latestDataSyncId = d
+                        if (a.isNotBlank()) latestAuthUser = a
+                    }
+
                     WebView(ctx).apply {
                         configureAuthWebView(cm)
+                        addJavascriptInterface(bridge, "CroixAuth")
                         webViewClient = object : WebViewClient() {
-                            private fun checkCookies(url: String?) {
+                            private fun extractAndCapture(view: WebView, url: String?) {
                                 if (captured) return
                                 if (url?.contains("music.youtube.com") != true && url?.contains("youtube.com") != true) return
+                                // Extract Metrolist-style VISITOR_DATA, DATASYNC_ID, SESSION_INDEX from page config
+                                runCatching {
+                                    view.evaluateJavascript(
+                                        "(function(){var c=(window.yt&&window.yt.config_)||{};CroixAuth.onAuthMeta(c.VISITOR_DATA||'',c.DATASYNC_ID||'',String(c.SESSION_INDEX||'0'));})();",
+                                        null,
+                                    )
+                                }
                                 cm.flush()
                                 val rawMusic = cm.getCookie("https://music.youtube.com").orEmpty()
                                 val rawYt = cm.getCookie("https://www.youtube.com").orEmpty()
@@ -317,17 +353,17 @@ fun YtMusicLoginOverlay(
                                     .distinctBy { it.substringBefore("=") }
                                     .joinToString("; ")
                                 if (merged.contains("SAPISID=") || merged.contains("__Secure-3PAPISID=")) {
-                                    captured = true
-                                    onCookieCaptured(merged)
+                                    view.postDelayed({
+                                        if (!captured) {
+                                            captured = true
+                                            onAuthCaptured(merged, latestVisitor, latestDataSyncId, latestAuthUser)
+                                        }
+                                    }, 450L)
                                 }
                             }
 
-                            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                                checkCookies(url)
-                            }
-
                             override fun onPageFinished(view: WebView, url: String?) {
-                                checkCookies(url)
+                                extractAndCapture(view, url)
                             }
                         }
                         webChromeClient = WebChromeClient()

@@ -174,6 +174,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     var settingsOpen by remember { mutableStateOf(false) }
     var spotifyLoginOpen by remember { mutableStateOf(false) }
     var ytMusicLoginOpen by remember { mutableStateOf(false) }
+    var ytMusicAddAnother by remember { mutableStateOf(false) }
     var trackForMenu by remember { mutableStateOf<Track?>(null) }
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var quickNewPlaylistName by remember { mutableStateOf("") }
@@ -300,6 +301,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                                 recentTracks = history,
                                 moods = vm.moods,
                                 favoriteIds = favoriteIds,
+                                ytMusicConnected = serverState.isYtMusicConnected,
                                 spotifyConnected = serverState.isSpotifyConnected,
                                 aiReady = serverState.aiConfig.isReady,
                                 aiCurator = aiCurator,
@@ -604,8 +606,19 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onTestAiConnection = vm::testAiConnection,
                     onUpdateServerConfig = vm::updateServerConfig,
                     onPingServer = vm::pingServer,
-                    onOpenYtMusicLogin = { ytMusicLoginOpen = true },
-                    onSyncYtMusicNow = vm::syncYtMusicLibrary,
+                    onOpenYtMusicLogin = {
+                        ytMusicAddAnother = false
+                        ytMusicLoginOpen = true
+                    },
+                    onOpenAddYtMusicAccount = {
+                        ytMusicAddAnother = true
+                        ytMusicLoginOpen = true
+                    },
+                    onSyncYtMusicNow = { vm.syncYtMusicLibrary(silent = false) },
+                    onRefreshYtMusicProfiles = vm::refreshYtMusicBrandProfiles,
+                    onSwitchYtMusicProfile = vm::switchYtMusicBrandProfile,
+                    onSwitchSavedYtAccount = vm::switchSavedYtMusicAccount,
+                    onRemoveSavedYtAccount = vm::removeSavedYtMusicAccount,
                     onImportYtMusicPlaylist = vm::importYtMusicPlaylist,
                     onDisconnectYtMusic = vm::disconnectYtMusic,
                     onOpenSpotifyLogin = { spotifyLoginOpen = true },
@@ -663,10 +676,11 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                 modifier = Modifier.zIndex(20f),
             ) {
                 YtMusicLoginOverlay(
+                    isAddingAnotherAccount = ytMusicAddAnother,
                     onDismiss = { ytMusicLoginOpen = false },
-                    onCookieCaptured = { cookie ->
+                    onAuthCaptured = { cookie, visitorData, dataSyncId, authUser ->
                         ytMusicLoginOpen = false
-                        vm.connectYtMusicCookie(cookie)
+                        vm.connectYtMusicAccount(cookie, visitorData, dataSyncId, authUser)
                     },
                 )
             }

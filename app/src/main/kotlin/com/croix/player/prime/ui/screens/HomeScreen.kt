@@ -406,8 +406,9 @@ fun HomeScreen(
         }
 
         // 2b. Discovery Duo: Radar de Joyas Ocultas + Descubrimiento a Ciegas (45s ???)
-        item {
-            Row(
+        if (design.showDiscoveryDuo) {
+            item {
+                Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp),
@@ -498,10 +499,12 @@ fun HomeScreen(
                 }
             }
         }
+        }
 
         // 2c. AI Music Curator Card (powered by user's Gemini / OpenAI API key!)
-        item {
-            var aiPromptInput by remember { mutableStateOf("") }
+        if (design.showAiCuratorCard) {
+            item {
+                var aiPromptInput by remember { mutableStateOf("") }
             CroixGlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -606,6 +609,7 @@ fun HomeScreen(
                     }
                 }
             }
+        }
         }
 
         // 3. Compact 2-Column Quick-Resume Grid ("Escuchado recientemente")
@@ -940,7 +944,9 @@ private fun QuickPickTrackRow(
     onToggleFavorite: () -> Unit,
     onOpenMenu: () -> Unit,
 ) {
+    val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
+    val titleMaxLines = if (design.twoLineTrackTitle) 2 else 1
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -965,7 +971,7 @@ private fun QuickPickTrackRow(
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                maxLines = 1,
+                maxLines = titleMaxLines,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
@@ -1098,7 +1104,7 @@ private fun EditorialHomeShelf(
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
-                                maxLines = 1,
+                                maxLines = if (design.twoLineTrackTitle) 2 else 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(

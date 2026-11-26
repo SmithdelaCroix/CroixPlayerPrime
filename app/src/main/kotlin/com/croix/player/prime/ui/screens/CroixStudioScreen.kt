@@ -10,6 +10,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -19,6 +20,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -60,9 +62,11 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
@@ -84,6 +88,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,6 +96,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -115,17 +121,26 @@ import com.croix.prime.design.CroixThemeJson
 import com.croix.prime.design.LocalCroixDesign
 import com.croix.prime.design.LocalCroixPalette
 import com.croix.prime.design.LocalCroixStrings
+import com.croix.prime.design.PrimeArtworkShape
 import com.croix.prime.design.PrimeAudioQuality
 import com.croix.prime.design.PrimeCardDensity
 import com.croix.prime.design.PrimeColorMode
+import com.croix.prime.design.PrimeColorSwatches
+import com.croix.prime.design.PrimeFontStyle
 import com.croix.prime.design.PrimeLanguageMode
 import com.croix.prime.design.PrimeLyricsAlign
+import com.croix.prime.design.PrimeLyricsAnimStyle
+import com.croix.prime.design.PrimeMiniPlayerStyle
 import com.croix.prime.design.PrimeNavBarStyle
+import com.croix.prime.design.PrimePlayerBackgroundStyle
+import com.croix.prime.design.PrimePlayerButtonStyle
 import com.croix.prime.design.PrimePlayerStyle
 import com.croix.prime.design.PrimePresets
 import com.croix.prime.design.PrimeProgressStyle
+import com.croix.prime.design.PrimeStartTab
 import com.croix.prime.design.PrimeTransitionStyle
 import com.croix.prime.design.PrimeVisualizerStyle
+import com.croix.prime.design.resolveArtworkShape
 import com.croix.prime.engine.AiApiConfig
 import com.croix.prime.engine.AiProviderMode
 import com.croix.prime.engine.ExternalIntegrationsConfig
@@ -185,6 +200,7 @@ fun SettingsAndStudioOverlay(
     onClose: () -> Unit,
     onUpdateDesign: ((CroixDesignState) -> CroixDesignState) -> Unit,
     onApplyPreset: (CroixDesignState) -> Unit,
+    onResetDesign: () -> Unit,
     onSelectAppIcon: (String) -> Unit,
     onSetSpeed: (Float) -> Unit,
     onSetPitch: (Float) -> Unit,
@@ -466,8 +482,8 @@ fun SettingsAndStudioOverlay(
                                     items = listOf(
                                         SegmentedEntry(
                                             icon = Icons.Rounded.Palette,
-                                            title = if (es) "Estudio de Apariencia" else "Appearance Studio",
-                                            subtitle = if (es) "Cristal, colores, inicio, transiciones y vista previa en vivo" else "Glass, colors, Home layout, transitions & live preview",
+                                            title = if (es) "Estudio de Apariencia Pro" else "Appearance Studio Pro",
+                                            subtitle = if (es) "16 colores, fuentes, formas de carátula, botones, fondos, mini-player y 12 temas" else "16 swatches, fonts, artwork shapes, buttons, backdrops & 12 themes",
                                             accent = palette.primary,
                                             badge = design.presetName,
                                             onClick = { page = SettingsPage.STUDIO },
@@ -884,55 +900,133 @@ fun SettingsAndStudioOverlay(
                         }
 
                         // =========================================================
-                        // SUBMENU: DEEP DYNAMIC APPEARANCE STUDIO + LIVE PREVIEW
+                        // SUBMENU: DEEP DYNAMIC APPEARANCE STUDIO + LIVE PREVIEW (v5.0 PRO)
                         // =========================================================
                         SettingsPage.STUDIO -> {
-                            // Live Interactive Preview Card
+                            // Live Interactive Preview Card reflecting shape, shadow, font, button style, seekbar & colors!
                             item {
-                                CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary) {
+                                var previewPlaying by remember { mutableStateOf(true) }
+                                var previewProgress by remember { mutableFloatStateOf(0.62f) }
+                                val previewArtShape = resolveArtworkShape(design)
+                                val previewPlayCorner by animateDpAsState(
+                                    targetValue = if (design.playerButtonStyle == PrimePlayerButtonStyle.SQUIRCLE_EXPRESSIVE && previewPlaying) 12.dp else 24.dp,
+                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                    label = "studioPreviewPlayCorner",
+                                )
+                                val previewPlayShape = RoundedCornerShape(previewPlayCorner)
+                                val previewBrush = if (design.useGradientStyle) {
+                                    Brush.linearGradient(listOf(palette.primary, palette.secondary))
+                                } else {
+                                    Brush.linearGradient(listOf(palette.primary, palette.primary))
+                                }
+                                val previewCardTint = when (design.playerBackgroundStyle) {
+                                    PrimePlayerBackgroundStyle.PURE_AMOLED -> Color.Black
+                                    else -> palette.primary
+                                }
+
+                                CroixGlassCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    accentTint = previewCardTint,
+                                    opacityOverride = if (design.playerBackgroundStyle == PrimePlayerBackgroundStyle.PURE_AMOLED) 0.78f else null,
+                                ) {
                                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                modifier = Modifier.weight(1f),
+                                            ) {
+                                                val artShadow = if (design.artworkShadowEnabled && design.artworkShadowElevationDp > 0.5f) {
+                                                    Modifier.shadow(
+                                                        elevation = (design.artworkShadowElevationDp * 0.55f).dp,
+                                                        shape = previewArtShape,
+                                                        ambientColor = palette.primary,
+                                                        spotColor = palette.primary,
+                                                    )
+                                                } else Modifier
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(44.dp)
-                                                        .clip(RoundedCornerShape(design.artworkCornerDp.coerceAtMost(22f).dp))
-                                                        .background(
-                                                            if (design.useGradientStyle) Brush.linearGradient(listOf(palette.primary, palette.secondary))
-                                                            else Brush.linearGradient(listOf(palette.primary, palette.primary)),
-                                                        ),
+                                                        .size(50.dp)
+                                                        .then(artShadow)
+                                                        .clip(previewArtShape)
+                                                        .background(previewBrush),
                                                     contentAlignment = Alignment.Center,
                                                 ) {
-                                                    Icon(Icons.Rounded.GraphicEq, null, tint = Color.White)
+                                                    if (design.vinylSpinEnabled || design.artworkShape == PrimeArtworkShape.CIRCLE_VINYL) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(16.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color.Black.copy(alpha = 0.72f))
+                                                                .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                                                        )
+                                                    } else {
+                                                        Icon(Icons.Rounded.GraphicEq, null, tint = Color.White)
+                                                    }
                                                 }
-                                                Column {
-                                                    Text(if (es) "Vista previa en vivo" else "Live Preview", color = Color.White, fontWeight = FontWeight.Bold)
-                                                    Text("${design.presetName} • ${design.progressStyle.label}", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        if (es) "Vista previa en vivo" else "Live Preview",
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        color = Color.White,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                    Text(
+                                                        "${design.presetName} • ${design.fontStyle.label} • ${design.progressStyle.label}",
+                                                        color = palette.textSecondary,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
                                                 }
+                                            }
+                                            val btnMod = when (design.playerButtonStyle) {
+                                                PrimePlayerButtonStyle.GRADIENT_CIRCLE,
+                                                PrimePlayerButtonStyle.SQUIRCLE_EXPRESSIVE,
+                                                -> Modifier.size(40.dp).clip(previewPlayShape).background(previewBrush)
+                                                PrimePlayerButtonStyle.GLASS_FROSTED -> Modifier
+                                                    .size(40.dp)
+                                                    .clip(previewPlayShape)
+                                                    .background(Color.White.copy(alpha = 0.16f))
+                                                    .border(1.5.dp, palette.glassBorderTop, previewPlayShape)
+                                                PrimePlayerButtonStyle.OUTLINED_NEON -> Modifier
+                                                    .size(40.dp)
+                                                    .clip(previewPlayShape)
+                                                    .background(Color.Black.copy(alpha = 0.45f))
+                                                    .border(2.dp, previewBrush, previewPlayShape)
+                                            }
+                                            val iconTint = when (design.playerButtonStyle) {
+                                                PrimePlayerButtonStyle.GLASS_FROSTED,
+                                                PrimePlayerButtonStyle.OUTLINED_NEON,
+                                                -> palette.primary
+                                                else -> Color.White
                                             }
                                             Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color.White),
+                                                modifier = btnMod.clickable { previewPlaying = !previewPlaying },
                                                 contentAlignment = Alignment.Center,
                                             ) {
-                                                Icon(Icons.Rounded.PlayArrow, null, tint = Color(0xFF0A0910))
+                                                Icon(
+                                                    if (previewPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                                    contentDescription = "Probar botón",
+                                                    tint = iconTint,
+                                                    modifier = Modifier.size(22.dp),
+                                                )
                                             }
                                         }
-                                        CroixSeekBar(progress = 0.62f, onSeek = {})
+                                        CroixSeekBar(progress = previewProgress, onSeek = { previewProgress = it })
                                     }
                                 }
                             }
 
                             val tabs = if (es) {
-                                listOf("Cristal", "Colores", "Inicio", "Reproductor", "Transiciones", "Presets")
+                                listOf("Colores", "Cristal", "Tipografía", "Reproductor", "Mini y Nav", "Inicio", "Letras y Anim.", "Presets")
                             } else {
-                                listOf("Glass", "Colors", "Home", "Player", "Transitions", "Presets")
+                                listOf("Colors", "Glass", "Typography", "Player", "Mini & Nav", "Home", "Lyrics & Anim", "Presets")
                             }
                             item {
                                 Row(
@@ -945,7 +1039,7 @@ fun SettingsAndStudioOverlay(
                                             accentTint = if (studioTab == idx) palette.primary else null,
                                             onClick = { studioTab = idx },
                                         ) {
-                                            Text(label, style = MaterialTheme.typography.labelMedium, color = Color.White, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                                            Text(label, style = MaterialTheme.typography.labelMedium, color = Color.White, modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp))
                                         }
                                     }
                                 }
@@ -955,38 +1049,8 @@ fun SettingsAndStudioOverlay(
                                 CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
                                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                         when (studioTab) {
+                                            // TAB 0: COLORES & 16 PALETAS RÁPIDAS
                                             0 -> {
-                                                StudioSlider(if (es) "Transparencia del Cristal" else "Glass Opacity", design.glassOpacity, 0.05f..0.75f, "${(design.glassOpacity * 100).roundToInt()}%") { v ->
-                                                    onUpdateDesign { it.copy(glassOpacity = v) }
-                                                }
-                                                StudioSlider(if (es) "Desenfoque de Barras" else "Floating Bar Blur", design.glassBlurDp, 0f..34f, "${design.glassBlurDp.roundToInt()} dp") { v ->
-                                                    onUpdateDesign { it.copy(glassBlurDp = v) }
-                                                }
-                                                StudioSlider(if (es) "Brillo del Borde" else "Border Glow", design.borderGlowAlpha, 0f..0.65f, "${(design.borderGlowAlpha * 100).roundToInt()}%") { v ->
-                                                    onUpdateDesign { it.copy(borderGlowAlpha = v) }
-                                                }
-                                                StudioSlider(if (es) "Grosor del Borde" else "Border Width", design.borderWidthDp, 0.5f..2.5f, "${"%.1f".format(design.borderWidthDp)} dp") { v ->
-                                                    onUpdateDesign { it.copy(borderWidthDp = v) }
-                                                }
-                                                StudioSlider(if (es) "Redondeo de Esquinas" else "Corner Radius", design.cornerRadiusDp, 8f..32f, "${design.cornerRadiusDp.roundToInt()} dp") { v ->
-                                                    onUpdateDesign { it.copy(cornerRadiusDp = v) }
-                                                }
-                                                StudioSlider(if (es) "Escala de Tipografía" else "Font Scale", design.fontScale, 0.85f..1.20f, "${(design.fontScale * 100).roundToInt()}%") { v ->
-                                                    onUpdateDesign { it.copy(fontScale = v) }
-                                                }
-                                                StudioSlider(if (es) "Resplandor Ambiental" else "Ambient Glow", design.ambientGlowStrength, 0f..0.9f, "${(design.ambientGlowStrength * 100).roundToInt()}%") { v ->
-                                                    onUpdateDesign { it.copy(ambientGlowStrength = v) }
-                                                }
-                                                StudioSwitch(if (es) "Fondo Animado Reactivo" else "Animated Backdrop", design.backdropMotionEnabled) { v ->
-                                                    onUpdateDesign { it.copy(backdropMotionEnabled = v) }
-                                                }
-                                                if (design.backdropMotionEnabled) {
-                                                    StudioSlider(if (es) "Velocidad del Fondo" else "Motion Speed", design.backdropMotionSpeed, 0.2f..2.5f, "${"%.1f".format(design.backdropMotionSpeed)}x") { v ->
-                                                        onUpdateDesign { it.copy(backdropMotionSpeed = v) }
-                                                    }
-                                                }
-                                            }
-                                            1 -> {
                                                 CroixGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = palette.primary, cornerRadius = 16.dp) {
                                                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                                         StudioSwitch(
@@ -1007,6 +1071,85 @@ fun SettingsAndStudioOverlay(
                                                         )
                                                     }
                                                 }
+
+                                                Text(if (es) "Paleta Rápida (16 colores)" else "Quick Color Palette (16)", color = Color.White, fontWeight = FontWeight.Bold)
+                                                PrimeColorSwatches.All.chunked(4).forEach { rowSwatches ->
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    ) {
+                                                        rowSwatches.forEach { sw ->
+                                                            val selected = if (sw.isDynamicAlbum) {
+                                                                design.colorMode == PrimeColorMode.ALBUM_MORPH
+                                                            } else {
+                                                                design.colorMode == PrimeColorMode.CUSTOM_GRADIENT &&
+                                                                    kotlin.math.abs(design.primaryHue - sw.primaryHue) < 4f &&
+                                                                    kotlin.math.abs(design.secondaryHue - sw.secondaryHue) < 4f
+                                                            }
+                                                            Column(
+                                                                modifier = Modifier
+                                                                    .weight(1f)
+                                                                    .clip(RoundedCornerShape(14.dp))
+                                                                    .background(if (selected) Color(sw.previewArgb).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.04f))
+                                                                    .border(
+                                                                        width = if (selected) 1.6.dp else 0.7.dp,
+                                                                        color = if (selected) Color(sw.previewArgb) else Color.White.copy(alpha = 0.12f),
+                                                                        shape = RoundedCornerShape(14.dp),
+                                                                    )
+                                                                    .clickable {
+                                                                        if (sw.isDynamicAlbum) {
+                                                                            onUpdateDesign {
+                                                                                it.copy(
+                                                                                    presetName = "Carátula Viva",
+                                                                                    colorMode = PrimeColorMode.ALBUM_MORPH,
+                                                                                    pureBlackBackground = false,
+                                                                                )
+                                                                            }
+                                                                        } else {
+                                                                            onUpdateDesign {
+                                                                                it.copy(
+                                                                                    presetName = sw.label,
+                                                                                    colorMode = PrimeColorMode.CUSTOM_GRADIENT,
+                                                                                    primaryHue = sw.primaryHue,
+                                                                                    secondaryHue = sw.secondaryHue,
+                                                                                    primarySaturation = sw.primarySat,
+                                                                                    secondarySaturation = sw.secondarySat,
+                                                                                )
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                                                            ) {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .size(30.dp)
+                                                                        .clip(CircleShape)
+                                                                        .background(
+                                                                            Brush.linearGradient(
+                                                                                listOf(Color(sw.previewArgb), Color(sw.secondaryPreviewArgb)),
+                                                                            ),
+                                                                        ),
+                                                                    contentAlignment = Alignment.Center,
+                                                                ) {
+                                                                    if (selected) {
+                                                                        Icon(Icons.Rounded.CheckCircle, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                                                    }
+                                                                }
+                                                                Text(
+                                                                    sw.label,
+                                                                    color = Color.White,
+                                                                    fontSize = 10.sp,
+                                                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                                    maxLines = 1,
+                                                                    overflow = TextOverflow.Ellipsis,
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
                                                 Text(if (es) "Modo de Relleno" else "Color Fill Mode", color = Color.White, fontWeight = FontWeight.Bold)
                                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                                                     CroixGlassCard(
@@ -1033,13 +1176,16 @@ fun SettingsAndStudioOverlay(
                                                 StudioSwitch(if (es) "Fondo Negro Puro AMOLED" else "Pure Black AMOLED", design.pureBlackBackground) { v ->
                                                     onUpdateDesign { it.copy(pureBlackBackground = v) }
                                                 }
+                                                StudioSwitch(if (es) "Tema aleatorio al abrir la app" else "Random theme on startup", design.randomThemeOnStartup) { v ->
+                                                    onUpdateDesign { it.copy(randomThemeOnStartup = v) }
+                                                }
                                                 StudioEnumRow(if (es) "Paleta Base" else "Color Palette", PrimeColorMode.entries, design.colorMode, { it.label }) { m ->
                                                     onUpdateDesign { it.copy(colorMode = m) }
                                                 }
                                                 Box(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .height(42.dp)
+                                                        .height(40.dp)
                                                         .clip(RoundedCornerShape(14.dp))
                                                         .background(
                                                             if (design.useGradientStyle) Brush.horizontalGradient(listOf(design.customPrimaryFromHue, design.customSecondaryFromHue))
@@ -1061,56 +1207,104 @@ fun SettingsAndStudioOverlay(
                                                     }
                                                 }
                                             }
-                                            2 -> {
-                                                StudioSwitch(if (es) "Mostrar Rueda Flow Principal" else "Show Flow Hero Wheel", design.showCroixFlowHero) { v ->
-                                                    onUpdateDesign { it.copy(showCroixFlowHero = v) }
+
+                                            // TAB 1: CRISTAL & AMBIENTE
+                                            1 -> {
+                                                StudioSlider(if (es) "Transparencia del Cristal" else "Glass Opacity", design.glassOpacity, 0.05f..0.75f, "${(design.glassOpacity * 100).roundToInt()}%") { v ->
+                                                    onUpdateDesign { it.copy(glassOpacity = v) }
                                                 }
-                                                StudioSwitch(if (es) "Mostrar Estados de Ánimo Flow" else "Show Flow Moods", design.showMoodChips) { v ->
-                                                    onUpdateDesign { it.copy(showMoodChips = v) }
+                                                StudioSlider(if (es) "Desenfoque de Barras" else "Floating Bar Blur", design.glassBlurDp, 0f..34f, "${design.glassBlurDp.roundToInt()} dp") { v ->
+                                                    onUpdateDesign { it.copy(glassBlurDp = v) }
                                                 }
-                                                StudioSwitch(if (es) "Mostrar Escuchado Recientemente" else "Show Recently Played", design.showQuickResumeGrid) { v ->
-                                                    onUpdateDesign { it.copy(showQuickResumeGrid = v) }
+                                                StudioSwitch(if (es) "Textura de grano cristalino (Haze)" else "Frosted Glass Grain Texture", design.glassNoiseEnabled) { v ->
+                                                    onUpdateDesign { it.copy(glassNoiseEnabled = v) }
                                                 }
-                                                StudioSwitch(if (es) "Mostrar Mixes Diarios (Hecho para ti)" else "Show Daily Mixes", design.showDailyMixes) { v ->
-                                                    onUpdateDesign { it.copy(showDailyMixes = v) }
+                                                StudioSlider(if (es) "Brillo del Borde" else "Border Glow", design.borderGlowAlpha, 0f..0.65f, "${(design.borderGlowAlpha * 100).roundToInt()}%") { v ->
+                                                    onUpdateDesign { it.copy(borderGlowAlpha = v) }
                                                 }
-                                                StudioSwitch(if (es) "Mostrar Selección Rápida" else "Show Quick Picks", design.showQuickPicks) { v ->
-                                                    onUpdateDesign { it.copy(showQuickPicks = v) }
+                                                StudioSlider(if (es) "Grosor del Borde" else "Border Width", design.borderWidthDp, 0.5f..2.5f, "${"%.1f".format(design.borderWidthDp)} dp") { v ->
+                                                    onUpdateDesign { it.copy(borderWidthDp = v) }
                                                 }
-                                                StudioSwitch(if (es) "Mostrar Artistas para ti" else "Show Artists Row", design.showFavoriteArtistsRow) { v ->
-                                                    onUpdateDesign { it.copy(showFavoriteArtistsRow = v) }
+                                                StudioSlider(if (es) "Redondeo de Esquinas" else "Corner Radius", design.cornerRadiusDp, 8f..32f, "${design.cornerRadiusDp.roundToInt()} dp") { v ->
+                                                    onUpdateDesign { it.copy(cornerRadiusDp = v) }
                                                 }
-                                                StudioEnumRow(if (es) "Densidad de Tarjetas" else "Card Density", PrimeCardDensity.entries, design.cardDensity, { it.label }) { d ->
-                                                    onUpdateDesign { it.copy(cardDensity = d) }
+                                                StudioSlider(if (es) "Resplandor Ambiental" else "Ambient Glow", design.ambientGlowStrength, 0f..0.9f, "${(design.ambientGlowStrength * 100).roundToInt()}%") { v ->
+                                                    onUpdateDesign { it.copy(ambientGlowStrength = v) }
                                                 }
-                                                StudioEnumRow(if (es) "Estilo de Barra Inferior" else "Nav Bar Style", PrimeNavBarStyle.entries, design.navBarStyle, { it.label }) { n ->
-                                                    onUpdateDesign { it.copy(navBarStyle = n) }
+                                                StudioSwitch(if (es) "Fondo Animado Reactivo" else "Animated Backdrop", design.backdropMotionEnabled) { v ->
+                                                    onUpdateDesign { it.copy(backdropMotionEnabled = v) }
                                                 }
-                                                StudioSwitch(if (es) "Mostrar Etiquetas de Navegación" else "Show Nav Labels", design.showNavLabels) { v ->
-                                                    onUpdateDesign { it.copy(showNavLabels = v) }
-                                                }
-                                                StudioSwitch(if (es) "Mini-Reproductor Flotante" else "Floating Mini-Player", design.miniPlayerFloating) { v ->
-                                                    onUpdateDesign { it.copy(miniPlayerFloating = v) }
-                                                }
-                                                StudioSlider(if (es) "Altura del Mini-Reproductor" else "Mini-Player Height", design.miniPlayerHeightDp, 56f..84f, "${design.miniPlayerHeightDp.roundToInt()} dp") { v ->
-                                                    onUpdateDesign { it.copy(miniPlayerHeightDp = v) }
+                                                if (design.backdropMotionEnabled) {
+                                                    StudioSlider(if (es) "Velocidad del Fondo" else "Motion Speed", design.backdropMotionSpeed, 0.2f..2.5f, "${"%.1f".format(design.backdropMotionSpeed)}x") { v ->
+                                                        onUpdateDesign { it.copy(backdropMotionSpeed = v) }
+                                                    }
                                                 }
                                             }
+
+                                            // TAB 2: TIPOGRAFÍA Y TEXTOS
+                                            2 -> {
+                                                StudioEnumRow(if (es) "Estilo de Fuente Global" else "Global Font Family", PrimeFontStyle.entries, design.fontStyle, { it.label }) { f ->
+                                                    onUpdateDesign { it.copy(fontStyle = f) }
+                                                }
+                                                StudioSlider(if (es) "Escala de Tipografía" else "Font Scale", design.fontScale, 0.85f..1.20f, "${(design.fontScale * 100).roundToInt()}%") { v ->
+                                                    onUpdateDesign { it.copy(fontScale = v) }
+                                                }
+                                                StudioSwitch(if (es) "Permitir 2 líneas en títulos largos" else "Two-line Track Titles", design.twoLineTrackTitle) { v ->
+                                                    onUpdateDesign { it.copy(twoLineTrackTitle = v) }
+                                                }
+                                                StudioSwitch(if (es) "Texto deslizante (Marquee) en reproductor" else "Marquee Scrolling Titles", design.marqueeTrackTitle) { v ->
+                                                    onUpdateDesign { it.copy(marqueeTrackTitle = v) }
+                                                }
+                                            }
+
+                                            // TAB 3: REPRODUCTOR Y CARÁTULA
                                             3 -> {
+                                                StudioEnumRow(if (es) "Fondo del Reproductor" else "Player Background", PrimePlayerBackgroundStyle.entries, design.playerBackgroundStyle, { it.label }) { bg ->
+                                                    onUpdateDesign { it.copy(playerBackgroundStyle = bg) }
+                                                }
+                                                StudioEnumRow(if (es) "Estilo de Botón Play/Pausa" else "Play Button Style", PrimePlayerButtonStyle.entries, design.playerButtonStyle, { it.label }) { b ->
+                                                    onUpdateDesign { it.copy(playerButtonStyle = b) }
+                                                }
+                                                StudioEnumRow(if (es) "Forma de la Carátula" else "Artwork Shape", PrimeArtworkShape.entries, design.artworkShape, { it.label }) { sh ->
+                                                    onUpdateDesign { it.copy(artworkShape = sh) }
+                                                }
                                                 StudioEnumRow(if (es) "Diseño del Reproductor" else "Player Layout", PrimePlayerStyle.entries, design.playerStyle, { it.label }) { s ->
                                                     onUpdateDesign { it.copy(playerStyle = s) }
                                                 }
-                                                StudioEnumRow(if (es) "Barra de Progreso" else "Progress Bar", PrimeProgressStyle.entries, design.progressStyle, { it.label }) { p ->
+                                                StudioEnumRow(if (es) "Barra de Progreso (6 estilos)" else "Progress Bar (6 styles)", PrimeProgressStyle.entries, design.progressStyle, { it.label }) { p ->
                                                     onUpdateDesign { it.copy(progressStyle = p) }
                                                 }
                                                 StudioEnumRow(if (es) "Visualizador en Vivo" else "Live Visualizer", PrimeVisualizerStyle.entries, design.visualizerStyle, { it.label }) { v ->
                                                     onUpdateDesign { it.copy(visualizerStyle = v) }
                                                 }
-                                                StudioSlider(if (es) "Redondeo de Carátula" else "Artwork Corner", design.artworkCornerDp, 0f..36f, "${design.artworkCornerDp.roundToInt()} dp") { v ->
+                                                StudioSlider(if (es) "Tamaño de la Carátula" else "Artwork Size", design.artworkScale, 0.64f..0.98f, "${(design.artworkScale * 100).roundToInt()}%") { v ->
+                                                    onUpdateDesign { it.copy(artworkScale = v) }
+                                                }
+                                                StudioSlider(if (es) "Redondeo / Corte de Carátula" else "Artwork Corner", design.artworkCornerDp, 0f..36f, "${design.artworkCornerDp.roundToInt()} dp") { v ->
                                                     onUpdateDesign { it.copy(artworkCornerDp = v) }
+                                                }
+                                                StudioSwitch(if (es) "Sombra luminosa en la carátula" else "Colored Artwork Glow Shadow", design.artworkShadowEnabled) { v ->
+                                                    onUpdateDesign { it.copy(artworkShadowEnabled = v) }
+                                                }
+                                                if (design.artworkShadowEnabled) {
+                                                    StudioSlider(if (es) "Intensidad de sombra" else "Shadow Elevation", design.artworkShadowElevationDp, 0f..32f, "${design.artworkShadowElevationDp.roundToInt()} dp") { v ->
+                                                        onUpdateDesign { it.copy(artworkShadowElevationDp = v) }
+                                                    }
                                                 }
                                                 StudioSwitch(if (es) "Efecto Vinilo Giratorio" else "Vinyl Spin Artwork", design.vinylSpinEnabled) { v ->
                                                     onUpdateDesign { it.copy(vinylSpinEnabled = v) }
+                                                }
+                                                StudioSwitch(if (es) "Ocultar carátula (Modo Enfoque)" else "Hide Artwork (Focus Mode)", design.hidePlayerArtwork) { v ->
+                                                    onUpdateDesign { it.copy(hidePlayerArtwork = v) }
+                                                }
+                                                StudioSwitch(if (es) "Tocar carátula para Play/Pausa" else "Tap Artwork to Play/Pause", design.tapArtworkToPlayPause) { v ->
+                                                    onUpdateDesign { it.copy(tapArtworkToPlayPause = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar barra de volumen en el reproductor" else "Show Volume Slider in Player", design.showPlayerVolumeBar) { v ->
+                                                    onUpdateDesign { it.copy(showPlayerVolumeBar = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mantener pantalla encendida en reproductor" else "Keep Screen On in Player", design.keepScreenOnPlayer) { v ->
+                                                    onUpdateDesign { it.copy(keepScreenOnPlayer = v) }
                                                 }
                                                 StudioSwitch(if (es) "Fondo Canvas Animado en Reproductor" else "Animated Canvas Backdrop", design.canvasMotionEnabled) { v ->
                                                     onUpdateDesign { it.copy(canvasMotionEnabled = v) }
@@ -1125,6 +1319,39 @@ fun SettingsAndStudioOverlay(
                                                 }
                                                 StudioSlider(if (es) "Opacidad del Panel de Controles" else "Control Dock Opacity", design.playerControlDockOpacity, 0.05f..0.80f, "${(design.playerControlDockOpacity * 100).roundToInt()}%") { v ->
                                                     onUpdateDesign { it.copy(playerControlDockOpacity = v) }
+                                                }
+                                            }
+
+                                            // TAB 4: MINI-REPRODUCTOR, NAVEGACIÓN E ÍCONO
+                                            4 -> {
+                                                StudioEnumRow(if (es) "Estilo del Mini-Reproductor" else "Mini-Player Style", PrimeMiniPlayerStyle.entries, design.miniPlayerStyle, { it.label }) { m ->
+                                                    onUpdateDesign {
+                                                        it.copy(
+                                                            miniPlayerStyle = m,
+                                                            miniPlayerFloating = m != PrimeMiniPlayerStyle.DOCKED_MINIMAL,
+                                                        )
+                                                    }
+                                                }
+                                                StudioSwitch(if (es) "Mini-Reproductor Flotante" else "Floating Mini-Player", design.miniPlayerFloating) { v ->
+                                                    onUpdateDesign { it.copy(miniPlayerFloating = v) }
+                                                }
+                                                StudioSwitch(if (es) "Deslizar Mini-Reproductor para cambiar tema" else "Swipe Mini-Player to Skip", design.swipeMiniPlayerToSkip) { v ->
+                                                    onUpdateDesign { it.copy(swipeMiniPlayerToSkip = v) }
+                                                }
+                                                StudioSlider(if (es) "Altura del Mini-Reproductor" else "Mini-Player Height", design.miniPlayerHeightDp, 56f..84f, "${design.miniPlayerHeightDp.roundToInt()} dp") { v ->
+                                                    onUpdateDesign { it.copy(miniPlayerHeightDp = v) }
+                                                }
+                                                StudioEnumRow(if (es) "Estilo de Barra Inferior" else "Nav Bar Style", PrimeNavBarStyle.entries, design.navBarStyle, { it.label }) { n ->
+                                                    onUpdateDesign { it.copy(navBarStyle = n) }
+                                                }
+                                                StudioSwitch(if (es) "Barra de navegación delgada (Slim)" else "Slim Navigation Bar", design.slimNavBar) { v ->
+                                                    onUpdateDesign { it.copy(slimNavBar = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Etiquetas de Navegación" else "Show Nav Labels", design.showNavLabels) { v ->
+                                                    onUpdateDesign { it.copy(showNavLabels = v) }
+                                                }
+                                                StudioEnumRow(if (es) "Pestaña al abrir la app" else "Default Start Tab", PrimeStartTab.entries, design.defaultStartTab, { it.label }) { tab ->
+                                                    onUpdateDesign { it.copy(defaultStartTab = tab) }
                                                 }
                                                 Text(if (es) "Ícono de la Aplicación (Launcher)" else "App Launcher Icon", color = palette.primary, fontWeight = FontWeight.Bold)
                                                 Row(
@@ -1158,7 +1385,58 @@ fun SettingsAndStudioOverlay(
                                                     }
                                                 }
                                             }
-                                            4 -> {
+
+                                            // TAB 5: PANTALLA DE INICIO
+                                            5 -> {
+                                                StudioEnumRow(if (es) "Densidad de Tarjetas" else "Card Density", PrimeCardDensity.entries, design.cardDensity, { it.label }) { d ->
+                                                    onUpdateDesign { it.copy(cardDensity = d) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Rueda Flow Principal" else "Show Flow Hero Wheel", design.showCroixFlowHero) { v ->
+                                                    onUpdateDesign { it.copy(showCroixFlowHero = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Estados de Ánimo Flow" else "Show Flow Moods", design.showMoodChips) { v ->
+                                                    onUpdateDesign { it.copy(showMoodChips = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Joyas Ocultas y Modo Misterio" else "Show Hidden Gems & Mystery Mode", design.showDiscoveryDuo) { v ->
+                                                    onUpdateDesign { it.copy(showDiscoveryDuo = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Curador Musical IA" else "Show AI Music Curator", design.showAiCuratorCard) { v ->
+                                                    onUpdateDesign { it.copy(showAiCuratorCard = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Escuchado Recientemente" else "Show Recently Played", design.showQuickResumeGrid) { v ->
+                                                    onUpdateDesign { it.copy(showQuickResumeGrid = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Mixes Diarios (Hecho para ti)" else "Show Daily Mixes", design.showDailyMixes) { v ->
+                                                    onUpdateDesign { it.copy(showDailyMixes = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Selección Rápida" else "Show Quick Picks", design.showQuickPicks) { v ->
+                                                    onUpdateDesign { it.copy(showQuickPicks = v) }
+                                                }
+                                                StudioSwitch(if (es) "Mostrar Artistas para ti" else "Show Artists Row", design.showFavoriteArtistsRow) { v ->
+                                                    onUpdateDesign { it.copy(showFavoriteArtistsRow = v) }
+                                                }
+                                            }
+
+                                            // TAB 6: LETRAS Y ANIMACIONES
+                                            6 -> {
+                                                StudioEnumRow(if (es) "Animación de Letras" else "Lyrics Animation", PrimeLyricsAnimStyle.entries, design.lyricsAnimStyle, { it.label }) { a ->
+                                                    onUpdateDesign { it.copy(lyricsAnimStyle = a) }
+                                                }
+                                                StudioEnumRow(if (es) "Alineación de Letras" else "Lyrics Alignment", PrimeLyricsAlign.entries, design.lyricsAlign, { it.label }) { a ->
+                                                    onUpdateDesign { it.copy(lyricsAlign = a) }
+                                                }
+                                                StudioSwitch(if (es) "Resplandor en línea activa" else "Active Lyric Glow", design.lyricsActiveGlow) { v ->
+                                                    onUpdateDesign { it.copy(lyricsActiveGlow = v) }
+                                                }
+                                                StudioSlider(if (es) "Tamaño de Letras" else "Lyrics Font Size", design.lyricsFontSizeSp, 16f..36f, "${design.lyricsFontSizeSp.roundToInt()} sp") { v ->
+                                                    onUpdateDesign { it.copy(lyricsFontSizeSp = v) }
+                                                }
+                                                StudioSlider(if (es) "Espaciado entre líneas" else "Lyrics Line Spacing", design.lyricsLineSpacingDp, 6f..26f, "${design.lyricsLineSpacingDp.roundToInt()} dp") { v ->
+                                                    onUpdateDesign { it.copy(lyricsLineSpacingDp = v) }
+                                                }
+                                                StudioSlider(if (es) "Desenfoque de Fondo en Letras" else "Lyrics Backdrop Blur", design.lyricsBackdropBlurDp, 0f..34f, "${design.lyricsBackdropBlurDp.roundToInt()} dp") { v ->
+                                                    onUpdateDesign { it.copy(lyricsBackdropBlurDp = v) }
+                                                }
                                                 StudioEnumRow(
                                                     title = strings.transitionStyleLabel,
                                                     entries = PrimeTransitionStyle.entries,
@@ -1171,23 +1449,58 @@ fun SettingsAndStudioOverlay(
                                                     }
                                                 }
                                             }
-                                            5 -> {
-                                                Text(if (es) "Temas Predefinidos (8)" else "Theme Presets (8)", color = palette.primary, fontWeight = FontWeight.Bold)
+
+                                            // TAB 7: 12 TEMAS PREDEFINIDOS + IMPORT/EXPORT + RESTABLECER
+                                            7 -> {
+                                                Text(if (es) "Temas Predefinidos (${PrimePresets.All.size})" else "Theme Presets (${PrimePresets.All.size})", color = palette.primary, fontWeight = FontWeight.Bold)
                                                 PrimePresets.All.forEach { preset ->
+                                                    val isActive = design.presetName == preset.presetName
+                                                    val pColor = when (preset.colorMode) {
+                                                        PrimeColorMode.VIOLET_GLASS -> Color(0xFFA238FF)
+                                                        PrimeColorMode.NEON_CYAN -> Color(0xFF00E5FF)
+                                                        PrimeColorMode.ALBUM_MORPH -> Color(0xFFFF4081)
+                                                        PrimeColorMode.AMOLED_BLACK -> Color(0xFF424250)
+                                                        PrimeColorMode.DYNAMIC_SYSTEM -> Color(0xFF80CBC4)
+                                                        PrimeColorMode.CUSTOM_GRADIENT -> preset.customPrimaryFromHue
+                                                    }
+                                                    val sColor = when (preset.colorMode) {
+                                                        PrimeColorMode.VIOLET_GLASS -> Color(0xFFFF2E93)
+                                                        PrimeColorMode.NEON_CYAN -> Color(0xFF7C4DFF)
+                                                        PrimeColorMode.ALBUM_MORPH -> Color(0xFF00E5FF)
+                                                        PrimeColorMode.AMOLED_BLACK -> Color.Black
+                                                        PrimeColorMode.DYNAMIC_SYSTEM -> Color(0xFF536DFE)
+                                                        PrimeColorMode.CUSTOM_GRADIENT -> preset.customSecondaryFromHue
+                                                    }
                                                     CroixGlassCard(
                                                         modifier = Modifier.fillMaxWidth(),
                                                         cornerRadius = 14.dp,
-                                                        accentTint = if (design.presetName == preset.presetName) palette.primary else null,
+                                                        accentTint = if (isActive) pColor else null,
                                                         onClick = { onApplyPreset(preset) },
                                                     ) {
                                                         Row(
                                                             modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                                                             verticalAlignment = Alignment.CenterVertically,
                                                         ) {
-                                                            Text(preset.presetName, color = Color.White, fontWeight = FontWeight.SemiBold)
-                                                            if (design.presetName == preset.presetName) {
-                                                                Text(if (es) "Activo" else "Active", color = palette.primary, fontWeight = FontWeight.Bold)
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(34.dp)
+                                                                    .clip(CircleShape)
+                                                                    .background(Brush.linearGradient(listOf(pColor, sColor)))
+                                                                    .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape),
+                                                            )
+                                                            Column(modifier = Modifier.weight(1f)) {
+                                                                Text(preset.presetName, color = Color.White, fontWeight = FontWeight.Bold)
+                                                                Text(
+                                                                    "${preset.fontStyle.label} • ${preset.playerBackgroundStyle.label} • ${preset.artworkShape.label}",
+                                                                    color = palette.textSecondary,
+                                                                    style = MaterialTheme.typography.bodySmall,
+                                                                    maxLines = 1,
+                                                                    overflow = TextOverflow.Ellipsis,
+                                                                )
+                                                            }
+                                                            if (isActive) {
+                                                                Text(if (es) "Activo" else "Active", color = palette.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
                                                             }
                                                         }
                                                     }
@@ -1215,6 +1528,14 @@ fun SettingsAndStudioOverlay(
                                                         modifier = Modifier.weight(1f),
                                                     ) { Text(if (es) "Importar JSON" else "Import JSON") }
                                                 }
+                                                OutlinedButton(
+                                                    onClick = onResetDesign,
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                ) {
+                                                    Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp))
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(if (es) "Restablecer diseño a valores originales" else "Reset Appearance to Defaults")
+                                                }
                                             }
                                         }
                                     }
@@ -1229,11 +1550,20 @@ fun SettingsAndStudioOverlay(
                             item {
                                 CroixGlassCard(modifier = Modifier.fillMaxWidth()) {
                                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        StudioEnumRow(if (es) "Animación de Letras" else "Lyrics Animation", PrimeLyricsAnimStyle.entries, design.lyricsAnimStyle, { it.label }) { a ->
+                                            onUpdateDesign { it.copy(lyricsAnimStyle = a) }
+                                        }
                                         StudioEnumRow(if (es) "Alineación de Letras" else "Lyrics Alignment", PrimeLyricsAlign.entries, design.lyricsAlign, { it.label }) { a ->
                                             onUpdateDesign { it.copy(lyricsAlign = a) }
                                         }
+                                        StudioSwitch(if (es) "Resplandor en línea activa" else "Active Lyric Glow", design.lyricsActiveGlow) { v ->
+                                            onUpdateDesign { it.copy(lyricsActiveGlow = v) }
+                                        }
                                         StudioSlider(if (es) "Tamaño de Letras" else "Lyrics Font Size", design.lyricsFontSizeSp, 16f..36f, "${design.lyricsFontSizeSp.roundToInt()} sp") { v ->
                                             onUpdateDesign { it.copy(lyricsFontSizeSp = v) }
+                                        }
+                                        StudioSlider(if (es) "Espaciado entre líneas" else "Lyrics Line Spacing", design.lyricsLineSpacingDp, 6f..26f, "${design.lyricsLineSpacingDp.roundToInt()} dp") { v ->
+                                            onUpdateDesign { it.copy(lyricsLineSpacingDp = v) }
                                         }
                                         StudioSlider(if (es) "Desenfoque de Fondo en Letras" else "Lyrics Backdrop Blur", design.lyricsBackdropBlurDp, 0f..34f, "${design.lyricsBackdropBlurDp.roundToInt()} dp") { v ->
                                             onUpdateDesign { it.copy(lyricsBackdropBlurDp = v) }
@@ -1249,6 +1579,9 @@ fun SettingsAndStudioOverlay(
                                         }
                                         StudioSwitch(if (es) "Romanizar Coreano/Japonés/Ruso automáticamente" else "Auto-romanize non-Latin scripts", design.lyricsAutoRomanize) { v ->
                                             onUpdateDesign { it.copy(lyricsAutoRomanize = v) }
+                                        }
+                                        StudioSwitch(if (es) "Mantener pantalla encendida en reproductor/letras" else "Keep Screen On", design.keepScreenOnPlayer) { v ->
+                                            onUpdateDesign { it.copy(keepScreenOnPlayer = v) }
                                         }
                                         StudioEnumRow(if (es) "Visualizador de Audio en Vivo" else "Live Visualizer", PrimeVisualizerStyle.entries, design.visualizerStyle, { it.label }) { v ->
                                             onUpdateDesign { it.copy(visualizerStyle = v) }
@@ -1761,6 +2094,12 @@ fun SettingsAndStudioOverlay(
                                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                         StudioSwitch(if (es) "Deslizar carátula para cambiar canción" else "Swipe Artwork to Skip", design.swipeArtworkToSkip) { v ->
                                             onUpdateDesign { it.copy(swipeArtworkToSkip = v) }
+                                        }
+                                        StudioSwitch(if (es) "Deslizar Mini-Reproductor para cambiar canción" else "Swipe Mini-Player to Skip", design.swipeMiniPlayerToSkip) { v ->
+                                            onUpdateDesign { it.copy(swipeMiniPlayerToSkip = v) }
+                                        }
+                                        StudioSwitch(if (es) "Tocar carátula para Play/Pausa" else "Tap Artwork to Play/Pause", design.tapArtworkToPlayPause) { v ->
+                                            onUpdateDesign { it.copy(tapArtworkToPlayPause = v) }
                                         }
                                         StudioSlider(if (es) "Salto con doble toque" else "Double-Tap Seek Step", design.doubleTapSeekSeconds.toFloat(), 5f..30f, "${design.doubleTapSeekSeconds}s") { v ->
                                             onUpdateDesign { it.copy(doubleTapSeekSeconds = v.roundToInt()) }

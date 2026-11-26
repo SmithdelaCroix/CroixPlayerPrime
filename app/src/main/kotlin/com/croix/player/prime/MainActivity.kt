@@ -5,8 +5,10 @@
 package com.croix.player.prime
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
@@ -61,6 +63,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -164,7 +168,8 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     val audioCacheBytes by vm.audioCacheBytes.collectAsState()
     val shazamState by vm.shazamState.collectAsState()
 
-    var currentRoute by remember { mutableStateOf("home") }
+    var currentRoute by remember { mutableStateOf(design.defaultStartTab.route) }
+    var startTabApplied by remember { mutableStateOf(false) }
     var playerExpanded by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var spotifyLoginOpen by remember { mutableStateOf(false) }
@@ -172,6 +177,28 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
     var trackForMenu by remember { mutableStateOf<Track?>(null) }
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var quickNewPlaylistName by remember { mutableStateOf("") }
+
+    // Apply persisted start tab once on cold launch without overriding manual tab switches
+    LaunchedEffect(design.defaultStartTab) {
+        if (!startTabApplied && design.defaultStartTab.route != "home") {
+            currentRoute = design.defaultStartTab.route
+            startTabApplied = true
+        }
+    }
+
+    // Keep screen awake while fullscreen player / lyrics are open if enabled by user
+    DisposableEffect(playerExpanded, design.keepScreenOnPlayer) {
+        val window = (context as? Activity)?.window
+        val keepAwake = playerExpanded && design.keepScreenOnPlayer
+        if (keepAwake) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     // Runtime Microphone Permission Launcher for Shazam Recognition
     val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -441,6 +468,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                             onExpand = { playerExpanded = true },
                             onTogglePlay = vm.playerController::togglePlayPause,
                             onNext = vm.playerController::skipNext,
+                            onPrev = vm.playerController::skipPrevious,
                         )
                         Spacer(Modifier.height(6.dp))
                     }
@@ -551,6 +579,7 @@ private fun CroixPrimeRoot(vm: CroixPrimeViewModel) {
                     onClose = { settingsOpen = false },
                     onUpdateDesign = vm::updateDesign,
                     onApplyPreset = vm::applyPreset,
+                    onResetDesign = vm::resetDesignToDefaults,
                     onSelectAppIcon = vm::selectAppIcon,
                     onSetSpeed = vm.playerController::setPlaybackSpeed,
                     onSetPitch = vm.playerController::setPlaybackPitch,

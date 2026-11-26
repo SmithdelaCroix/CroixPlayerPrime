@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,7 +44,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -58,6 +59,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -97,18 +99,45 @@ val LocalCroixPalette = staticCompositionLocalOf {
     )
 }
 
-private fun buildPrimeTypography(scale: Float): Typography {
+fun resolveArtworkShape(design: CroixDesignState): Shape {
+    if (design.vinylSpinEnabled) return CircleShape
+    return when (design.artworkShape) {
+        PrimeArtworkShape.ROUNDED -> RoundedCornerShape(design.artworkCornerDp.dp)
+        PrimeArtworkShape.SQUIRCLE -> RoundedCornerShape(percent = 28)
+        PrimeArtworkShape.SQUARE -> RoundedCornerShape(4.dp)
+        PrimeArtworkShape.CIRCLE_VINYL -> CircleShape
+        PrimeArtworkShape.CUT_CORNERS -> CutCornerShape(design.artworkCornerDp.coerceIn(10f, 30f).dp)
+    }
+}
+
+private fun buildPrimeTypography(scale: Float, fontStyle: PrimeFontStyle): Typography {
     val s = scale.coerceIn(0.85f, 1.20f)
+    val family = when (fontStyle) {
+        PrimeFontStyle.MODERN_SANS -> FontFamily.SansSerif
+        PrimeFontStyle.EDITORIAL_SERIF -> FontFamily.Serif
+        PrimeFontStyle.TECH_MONO -> FontFamily.Monospace
+        PrimeFontStyle.COMPACT_CLEAN -> FontFamily.Default
+    }
+    val headingTracking = when (fontStyle) {
+        PrimeFontStyle.TECH_MONO -> (-0.2).sp
+        PrimeFontStyle.COMPACT_CLEAN -> (-1.0).sp
+        PrimeFontStyle.EDITORIAL_SERIF -> (-0.3).sp
+        PrimeFontStyle.MODERN_SANS -> (-0.8).sp
+    }
+    val headWeight = if (fontStyle == PrimeFontStyle.COMPACT_CLEAN) FontWeight.Bold else FontWeight.Black
+    val subHeadWeight = if (fontStyle == PrimeFontStyle.COMPACT_CLEAN) FontWeight.SemiBold else FontWeight.ExtraBold
+
     return Typography(
-        headlineLarge = TextStyle(fontSize = (30f * s).sp, fontWeight = FontWeight.Black, letterSpacing = (-0.8).sp),
-        headlineMedium = TextStyle(fontSize = (24f * s).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp),
-        titleLarge = TextStyle(fontSize = (20f * s).sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
-        titleMedium = TextStyle(fontSize = (16f * s).sp, fontWeight = FontWeight.Bold),
-        bodyLarge = TextStyle(fontSize = (15f * s).sp, fontWeight = FontWeight.Medium),
-        bodyMedium = TextStyle(fontSize = (14f * s).sp, fontWeight = FontWeight.Normal),
-        bodySmall = TextStyle(fontSize = (12f * s).sp, fontWeight = FontWeight.Normal),
-        labelMedium = TextStyle(fontSize = (12f * s).sp, fontWeight = FontWeight.SemiBold),
-        labelSmall = TextStyle(fontSize = (11f * s).sp, fontWeight = FontWeight.SemiBold),
+        headlineLarge = TextStyle(fontFamily = family, fontSize = (30f * s).sp, fontWeight = headWeight, letterSpacing = headingTracking),
+        headlineMedium = TextStyle(fontFamily = family, fontSize = (24f * s).sp, fontWeight = subHeadWeight, letterSpacing = (-0.4).sp),
+        titleLarge = TextStyle(fontFamily = family, fontSize = (20f * s).sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
+        titleMedium = TextStyle(fontFamily = family, fontSize = (16f * s).sp, fontWeight = FontWeight.Bold),
+        bodyLarge = TextStyle(fontFamily = family, fontSize = (15f * s).sp, fontWeight = FontWeight.Medium),
+        bodyMedium = TextStyle(fontFamily = family, fontSize = (14f * s).sp, fontWeight = FontWeight.Normal),
+        bodySmall = TextStyle(fontFamily = family, fontSize = (12f * s).sp, fontWeight = FontWeight.Normal),
+        labelLarge = TextStyle(fontFamily = family, fontSize = (13f * s).sp, fontWeight = FontWeight.Bold),
+        labelMedium = TextStyle(fontFamily = family, fontSize = (12f * s).sp, fontWeight = FontWeight.SemiBold),
+        labelSmall = TextStyle(fontFamily = family, fontSize = (11f * s).sp, fontWeight = FontWeight.SemiBold),
     )
 }
 
@@ -183,8 +212,8 @@ fun CroixPrimeTheme(
     val strings = androidx.compose.runtime.remember(safeDesign.languageMode) {
         resolveCroixStrings(safeDesign.languageMode)
     }
-    val typography = androidx.compose.runtime.remember(safeDesign.fontScale) {
-        buildPrimeTypography(safeDesign.fontScale)
+    val typography = androidx.compose.runtime.remember(safeDesign.fontScale, safeDesign.fontStyle) {
+        buildPrimeTypography(safeDesign.fontScale, safeDesign.fontStyle)
     }
 
     CompositionLocalProvider(
@@ -201,7 +230,7 @@ fun CroixPrimeTheme(
 }
 
 /**
- * 120fps zero-recomposition ambient backdrop using Canvas radial gradients (no expensive full-screen RenderEffect blur!).
+ * 120fps zero-recomposition ambient backdrop using Canvas radial gradients.
  */
 @Composable
 fun CroixAnimatedBackdrop(
@@ -237,7 +266,6 @@ fun CroixAnimatedBackdrop(
         val driftY = if (phaseState != null) sin(phase) * (size.height * 0.09f) else 0f
 
         if (!design.useGradientStyle) {
-            // Solid color ambient tint mode
             drawRect(
                 color = palette.primary.copy(alpha = (glow * 0.24f).coerceIn(0f, 0.35f)),
             )
@@ -263,6 +291,64 @@ fun CroixAnimatedBackdrop(
                 center = Offset(size.width * 0.80f - driftX, size.height * 0.78f - driftY),
             )
         }
+    }
+}
+
+/**
+ * Multi-orb liquid Aurora Mesh backdrop for the fullscreen Player (LIVE_MESH style, 120fps pure Canvas!).
+ */
+@Composable
+fun CroixLiveMeshBackdrop(
+    animate: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val design = LocalCroixDesign.current
+    val palette = LocalCroixPalette.current
+    val phaseState = if (animate) {
+        val transition = rememberInfiniteTransition(label = "live_mesh")
+        val dur = (10_500f / design.backdropMotionSpeed).toInt().coerceIn(4_000, 26_000)
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2.0 * PI).toFloat(),
+            animationSpec = infiniteRepeatable(tween(dur, easing = LinearEasing), RepeatMode.Restart),
+            label = "mesh_phase",
+        )
+    } else null
+
+    Canvas(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF07060C)),
+    ) {
+        val p = phaseState?.value ?: 0.8f
+        val w = size.width
+        val h = size.height
+        val blend = lerp(palette.primary, palette.secondary, 0.5f)
+
+        val c1 = Offset(w * (0.22f + 0.18f * cos(p)), h * (0.18f + 0.12f * sin(p)))
+        val c2 = Offset(w * (0.82f + 0.14f * sin(p * 1.3f)), h * (0.44f + 0.16f * cos(p)))
+        val c3 = Offset(w * (0.35f - 0.16f * sin(p * 0.8f)), h * (0.82f - 0.12f * cos(p * 1.1f)))
+
+        drawCircle(
+            brush = Brush.radialGradient(listOf(palette.primary.copy(alpha = 0.72f), Color.Transparent), center = c1, radius = w * 0.98f),
+            radius = w * 0.98f,
+            center = c1,
+        )
+        drawCircle(
+            brush = Brush.radialGradient(listOf(palette.secondary.copy(alpha = 0.62f), Color.Transparent), center = c2, radius = w * 0.94f),
+            radius = w * 0.94f,
+            center = c2,
+        )
+        drawCircle(
+            brush = Brush.radialGradient(listOf(blend.copy(alpha = 0.48f), Color.Transparent), center = c3, radius = w * 0.90f),
+            radius = w * 0.90f,
+            center = c3,
+        )
+        drawRect(
+            brush = Brush.verticalGradient(
+                listOf(Color.Black.copy(alpha = 0.18f), Color.Black.copy(alpha = 0.42f), Color.Black.copy(alpha = 0.72f)),
+            ),
+        )
     }
 }
 
@@ -293,7 +379,7 @@ fun CroixGlassCard(
                 backgroundColor = palette.background.copy(alpha = 0.5f),
                 tint = HazeTint(baseFill),
                 blurRadius = design.glassBlurDp.dp,
-                noiseFactor = 0.04f,
+                noiseFactor = if (design.glassNoiseEnabled) 0.045f else 0f,
             ),
         )
     } else {
@@ -333,7 +419,7 @@ data class CroixNavDestination(
 )
 
 /**
- * Translucent navigation bar switching live between Floating Pill, Docked Glass, and Compact Icons.
+ * Translucent navigation bar switching live between Floating Pill, Docked Glass, Compact Icons, and Slim mode.
  */
 @Composable
 fun CroixNavigationBar(
@@ -346,15 +432,17 @@ fun CroixNavigationBar(
     val design = LocalCroixDesign.current
     val palette = LocalCroixPalette.current
     val isFloating = design.navBarStyle != PrimeNavBarStyle.DOCKED_TRANSLUCENT
-    val showLabels = design.showNavLabels && design.navBarStyle != PrimeNavBarStyle.COMPACT_ICONS
+    val showLabels = design.showNavLabels && design.navBarStyle != PrimeNavBarStyle.COMPACT_ICONS && !design.slimNavBar
 
     val outerPadding = if (isFloating) 16.dp else 0.dp
     val corner = if (isFloating) (design.cornerRadiusDp + 6f).coerceAtMost(36f).dp else 0.dp
+    val rowVPad = if (design.slimNavBar) 6.dp else 10.dp
+    val itemVPad = if (design.slimNavBar) 4.dp else 6.dp
 
     CroixGlassCard(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = outerPadding, vertical = if (isFloating) 10.dp else 0.dp),
+            .padding(horizontal = outerPadding, vertical = if (isFloating) (if (design.slimNavBar) 6.dp else 10.dp) else 0.dp),
         hazeState = hazeState,
         cornerRadius = corner,
         opacityOverride = (design.glassOpacity + 0.08f).coerceAtMost(0.80f),
@@ -362,7 +450,7 @@ fun CroixNavigationBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
+                .padding(horizontal = 8.dp, vertical = rowVPad),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -375,14 +463,14 @@ fun CroixNavigationBar(
                             if (selected) palette.primary.copy(alpha = 0.24f) else Color.Transparent,
                         )
                         .clickable { onSelect(dest.route) }
-                        .padding(horizontal = 22.dp, vertical = 6.dp),
+                        .padding(horizontal = 22.dp, vertical = itemVPad),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Icon(
                         imageVector = dest.icon,
                         contentDescription = dest.label,
                         tint = if (selected) palette.primary else palette.textSecondary,
-                        modifier = Modifier.size(22.dp),
+                        modifier = Modifier.size(if (design.slimNavBar) 20.dp else 22.dp),
                     )
                     if (showLabels) {
                         Spacer(Modifier.height(2.dp))
@@ -478,7 +566,8 @@ fun CroixAudioVisualizer(
 }
 
 /**
- * Interactive seekbar supporting 4 live styles from Croix Studio: Waveform, Capsule, Thin Line, Squiggly.
+ * Interactive seekbar supporting 6 live styles from Croix Studio:
+ * Waveform, Capsule, Thin Line, Squiggly, Dashed EQ, and Glow Bar.
  */
 @Composable
 fun CroixSeekBar(
@@ -565,6 +654,49 @@ fun CroixSeekBar(
                     }
                     drawPath(path, color = palette.primary, style = Stroke(width = 6f, cap = StrokeCap.Round))
                     drawCircle(Color.White, radius = 10f, center = Offset(activeX, centerY))
+                }
+                PrimeProgressStyle.DASHED_EQ -> {
+                    val segments = 26
+                    val slot = w / segments
+                    val segW = (slot * 0.66f).coerceAtLeast(4f)
+                    val segH = 10f
+                    for (i in 0 until segments) {
+                        val frac = (i + 0.5f) / segments
+                        val active = frac <= clamped
+                        val x = i * slot + (slot - segW) / 2f
+                        drawRoundRect(
+                            color = if (active) lerp(palette.primary, palette.secondary, frac) else inactiveColor,
+                            topLeft = Offset(x, centerY - segH / 2f),
+                            size = Size(segW, segH),
+                            cornerRadius = CornerRadius(4f, 4f),
+                        )
+                    }
+                }
+                PrimeProgressStyle.GLOW_BAR -> {
+                    val barH = 8f
+                    drawRoundRect(
+                        color = inactiveColor,
+                        topLeft = Offset(0f, centerY - barH / 2f),
+                        size = Size(w, barH),
+                        cornerRadius = CornerRadius(barH / 2f, barH / 2f),
+                    )
+                    // Outer neon halo
+                    drawRoundRect(
+                        brush = Brush.horizontalGradient(listOf(palette.primary.copy(alpha = 0.36f), palette.secondary.copy(alpha = 0.42f))),
+                        topLeft = Offset(0f, centerY - 12f),
+                        size = Size(activeX.coerceAtLeast(barH), 24f),
+                        cornerRadius = CornerRadius(12f, 12f),
+                    )
+                    // Core laser bar
+                    drawRoundRect(
+                        brush = Brush.horizontalGradient(listOf(palette.primary, palette.secondary)),
+                        topLeft = Offset(0f, centerY - barH / 2f),
+                        size = Size(activeX.coerceAtLeast(barH), barH),
+                        cornerRadius = CornerRadius(barH / 2f, barH / 2f),
+                    )
+                    // Glowing thumb halo + core
+                    drawCircle(palette.secondary.copy(alpha = 0.45f), radius = 16f, center = Offset(activeX, centerY))
+                    drawCircle(Color.White, radius = 8f, center = Offset(activeX, centerY))
                 }
             }
         }

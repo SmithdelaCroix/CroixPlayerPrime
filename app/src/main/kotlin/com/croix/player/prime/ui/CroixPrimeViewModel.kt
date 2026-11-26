@@ -81,6 +81,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -378,6 +379,13 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun observeDesignPreferences() {
         viewModelScope.launch {
+            // Apply a fresh random visual preset once on cold launch if enabled
+            val initial = runCatching { designRepo.designFlow.first() }.getOrNull()
+            if (initial?.randomThemeOnStartup == true) {
+                val candidates = PrimePresets.All.filter { it.presetName != initial.presetName }
+                val pick = (candidates.ifEmpty { PrimePresets.All }).random()
+                designRepo.applyPreset(pick)
+            }
             designState.collect { cfg ->
                 shakeDetector.configure(cfg.shakeToSkipEnabled, cfg.shakeSensitivity)
                 val q = when (cfg.audioQuality) {
@@ -1467,6 +1475,10 @@ class CroixPrimeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun applyPreset(preset: CroixDesignState) {
         viewModelScope.launch { designRepo.applyPreset(preset) }
+    }
+
+    fun resetDesignToDefaults() {
+        viewModelScope.launch { designRepo.resetToDefaults() }
     }
 
     override fun onCleared() {

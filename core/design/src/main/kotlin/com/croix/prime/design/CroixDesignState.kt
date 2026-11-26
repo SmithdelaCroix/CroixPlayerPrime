@@ -36,11 +36,70 @@ enum class PrimePlayerStyle(val label: String) {
 }
 
 @Serializable
+enum class PrimePlayerBackgroundStyle(val label: String) {
+    BLURRED_COVER("Carátula Difuminada"),
+    DYNAMIC_GRADIENT("Gradiente Vivo"),
+    LIVE_MESH("Aurora Viva"),
+    SOLID_DARK("Oscuro Minimal"),
+    PURE_AMOLED("Negro Puro AMOLED"),
+}
+
+@Serializable
+enum class PrimePlayerButtonStyle(val label: String) {
+    GRADIENT_CIRCLE("Círculo Gradiente"),
+    GLASS_FROSTED("Cristal Translúcido"),
+    SQUIRCLE_EXPRESSIVE("Squircle Expresivo"),
+    OUTLINED_NEON("Borde Neón"),
+}
+
+@Serializable
+enum class PrimeMiniPlayerStyle(val label: String) {
+    FLOATING_GLASS("Cristal Flotante"),
+    CAPSULE_PILL("Cápsula Compacta"),
+    DOCKED_MINIMAL("Barra Acoplada"),
+    PURE_AMOLED("AMOLED Negro"),
+}
+
+@Serializable
+enum class PrimeArtworkShape(val label: String) {
+    ROUNDED("Redondeada"),
+    SQUIRCLE("Squircle"),
+    SQUARE("Cuadrada"),
+    CIRCLE_VINYL("Vinilo Circular"),
+    CUT_CORNERS("Esquinas Cortadas"),
+}
+
+@Serializable
+enum class PrimeFontStyle(val label: String) {
+    MODERN_SANS("Moderna Sans"),
+    EDITORIAL_SERIF("Editorial Serif"),
+    TECH_MONO("Técnica Mono"),
+    COMPACT_CLEAN("Limpia Compacta"),
+}
+
+@Serializable
+enum class PrimeLyricsAnimStyle(val label: String) {
+    SMOOTH_FADE("Fundido Suave"),
+    SCALE_POP("Escala Viva"),
+    NEON_GLOW("Brillo Neón"),
+    KARAOKE_SLIDE("Desplazamiento"),
+}
+
+@Serializable
+enum class PrimeStartTab(val label: String, val route: String) {
+    HOME("Inicio", "home"),
+    SEARCH("Buscar", "search"),
+    FAVORITES("Favoritos", "favorites"),
+}
+
+@Serializable
 enum class PrimeProgressStyle(val label: String) {
     WAVEFORM("Onda"),
     CAPSULE("Cápsula"),
     THIN_LINE("Línea Fina"),
     SQUIGGLY("Ondulada"),
+    DASHED_EQ("Segmentada"),
+    GLOW_BAR("Barra Neón"),
 }
 
 @Serializable
@@ -95,19 +154,58 @@ enum class PrimeAudioQuality(val labelEs: String, val labelEn: String) {
 }
 
 @Immutable
+data class PrimeColorSwatch(
+    val id: String,
+    val label: String,
+    val primaryHue: Float,
+    val secondaryHue: Float,
+    val primarySat: Float = 0.85f,
+    val secondarySat: Float = 0.85f,
+    val previewArgb: Long,
+    val secondaryPreviewArgb: Long,
+    val isDynamicAlbum: Boolean = false,
+)
+
+object PrimeColorSwatches {
+    val All: List<PrimeColorSwatch> = listOf(
+        PrimeColorSwatch("dynamic", "Canción", 272f, 330f, 0.85f, 0.85f, 0xFFFF4081, 0xFF00E5FF, isDynamicAlbum = true),
+        PrimeColorSwatch("violet", "Violeta", 272f, 330f, 0.82f, 0.86f, 0xFFA238FF, 0xFFFF2E93),
+        PrimeColorSwatch("magenta", "Magenta", 322f, 275f, 0.88f, 0.84f, 0xFFFF2E93, 0xFFA238FF),
+        PrimeColorSwatch("crimson", "Carmesí", 352f, 22f, 0.88f, 0.86f, 0xFFFF1744, 0xFFFF6D00),
+        PrimeColorSwatch("coral", "Coral", 14f, 338f, 0.88f, 0.84f, 0xFFFF5E5B, 0xFFFF2E93),
+        PrimeColorSwatch("solar", "Naranja", 28f, 48f, 0.92f, 0.88f, 0xFFFF7A00, 0xFFFFCA28),
+        PrimeColorSwatch("gold", "Oro", 44f, 24f, 0.90f, 0.82f, 0xFFFFC107, 0xFFFF6F00),
+        PrimeColorSwatch("lime", "Lima Neón", 86f, 152f, 0.90f, 0.86f, 0xFFAEEA00, 0xFF00E676),
+        PrimeColorSwatch("emerald", "Esmeralda", 148f, 190f, 0.86f, 0.82f, 0xFF00E676, 0xFF00B8D4),
+        PrimeColorSwatch("turquoise", "Turquesa", 174f, 212f, 0.86f, 0.84f, 0xFF1DE9B6, 0xFF2979FF),
+        PrimeColorSwatch("cyan", "Cian", 188f, 260f, 0.90f, 0.84f, 0xFF00E5FF, 0xFF7C4DFF),
+        PrimeColorSwatch("sky", "Azul Cielo", 206f, 242f, 0.86f, 0.84f, 0xFF29B6F6, 0xFF536DFE),
+        PrimeColorSwatch("indigo", "Índigo", 236f, 286f, 0.84f, 0.84f, 0xFF536DFE, 0xFFAA00FF),
+        PrimeColorSwatch("lavender", "Lavanda", 262f, 304f, 0.56f, 0.62f, 0xFFB388FF, 0xFFEA80FC),
+        PrimeColorSwatch("sakura", "Sakura", 336f, 294f, 0.54f, 0.52f, 0xFFFF80AB, 0xFFCE93D8),
+        PrimeColorSwatch("mono", "Plata Mono", 220f, 220f, 0.25f, 0.25f, 0xFFD0D5E2, 0xFF8C94A8),
+    )
+}
+
+@Immutable
 @Serializable
 data class CroixDesignState(
     val presetName: String = "Cristal Violeta",
     // Glassmorphism translucency controls (applied across the ENTIRE app)
     val glassOpacity: Float = 0.16f,
     val glassBlurDp: Float = 22f,
+    val glassNoiseEnabled: Boolean = true,
     val borderGlowAlpha: Float = 0.24f,
     val borderWidthDp: Float = 1.0f,
     val cornerRadiusDp: Float = 22f,
     val ambientGlowStrength: Float = 0.50f,
     val backdropMotionEnabled: Boolean = true,
     val backdropMotionSpeed: Float = 1.0f,
+    // Typography & Text Behavior
     val fontScale: Float = 1.0f,
+    val fontStyle: PrimeFontStyle = PrimeFontStyle.MODERN_SANS,
+    val twoLineTrackTitle: Boolean = false,
+    val marqueeTrackTitle: Boolean = true,
     // Deep Dynamic Color & Gradient Engine
     val colorMode: PrimeColorMode = PrimeColorMode.VIOLET_GLASS,
     val useGradientStyle: Boolean = true,
@@ -118,16 +216,29 @@ data class CroixDesignState(
     val primarySaturation: Float = 0.80f,
     val secondarySaturation: Float = 0.84f,
     val pureBlackBackground: Boolean = false,
+    val randomThemeOnStartup: Boolean = false,
     // Home Screen Editorial Customization
     val showCroixFlowHero: Boolean = true,
     val showMoodChips: Boolean = true,
+    val showDiscoveryDuo: Boolean = true,
+    val showAiCuratorCard: Boolean = true,
     val showQuickResumeGrid: Boolean = true,
     val showDailyMixes: Boolean = true,
     val showQuickPicks: Boolean = true,
     val showFavoriteArtistsRow: Boolean = true,
     val cardDensity: PrimeCardDensity = PrimeCardDensity.EDITORIAL,
-    // Now Playing & Visualizer
+    // Now Playing, Artwork & Visualizer Customization
     val playerStyle: PrimePlayerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
+    val playerBackgroundStyle: PrimePlayerBackgroundStyle = PrimePlayerBackgroundStyle.BLURRED_COVER,
+    val playerButtonStyle: PrimePlayerButtonStyle = PrimePlayerButtonStyle.GRADIENT_CIRCLE,
+    val artworkShape: PrimeArtworkShape = PrimeArtworkShape.ROUNDED,
+    val artworkScale: Float = 0.86f,
+    val artworkShadowEnabled: Boolean = true,
+    val artworkShadowElevationDp: Float = 18f,
+    val hidePlayerArtwork: Boolean = false,
+    val tapArtworkToPlayPause: Boolean = false,
+    val showPlayerVolumeBar: Boolean = false,
+    val keepScreenOnPlayer: Boolean = false,
     val progressStyle: PrimeProgressStyle = PrimeProgressStyle.WAVEFORM,
     val visualizerStyle: PrimeVisualizerStyle = PrimeVisualizerStyle.SPECTRUM_BARS,
     val artworkCornerDp: Float = 24f,
@@ -139,17 +250,24 @@ data class CroixDesignState(
     val autoPlayRelated: Boolean = true,
     // Gestures & Hardware
     val swipeArtworkToSkip: Boolean = true,
+    val swipeMiniPlayerToSkip: Boolean = true,
     val doubleTapSeekSeconds: Int = 10,
     val shakeToSkipEnabled: Boolean = false,
     val shakeSensitivity: Float = 0.55f,
     // Navigation & Mini-Player
     val navBarStyle: PrimeNavBarStyle = PrimeNavBarStyle.FLOATING_GLASS_PILL,
     val showNavLabels: Boolean = true,
+    val slimNavBar: Boolean = false,
+    val defaultStartTab: PrimeStartTab = PrimeStartTab.HOME,
+    val miniPlayerStyle: PrimeMiniPlayerStyle = PrimeMiniPlayerStyle.FLOATING_GLASS,
     val miniPlayerFloating: Boolean = true,
     val miniPlayerHeightDp: Float = 66f,
-    // Lyrics
+    // Lyrics Customization
     val lyricsFontSizeSp: Float = 24f,
     val lyricsAlign: PrimeLyricsAlign = PrimeLyricsAlign.START,
+    val lyricsAnimStyle: PrimeLyricsAnimStyle = PrimeLyricsAnimStyle.SCALE_POP,
+    val lyricsLineSpacingDp: Float = 12f,
+    val lyricsActiveGlow: Boolean = true,
     val lyricsBackdropBlurDp: Float = 26f,
     val lyricsOffsetMs: Long = 0L,
     val lyricsAutoRomanize: Boolean = false,
@@ -164,7 +282,7 @@ data class CroixDesignState(
     val transitionSpeed: Float = 1.0f,
     val crossfadeSeconds: Int = 0,
     val languageMode: PrimeLanguageMode = PrimeLanguageMode.SPANISH,
-    // v4.0 / v4.5 Prime Pro Features (Cache, Canvas, 3D Parallax BETA, Private Mode, App Icon, Output Profiles)
+    // v4.0 / v4.5 Prime Pro Features
     val audioCacheLimitMb: Int = 512,
     val canvasMotionEnabled: Boolean = true,
     val artworkParallax3d: Boolean = false,
@@ -190,11 +308,14 @@ data class CroixDesignState(
         primarySaturation = primarySaturation.coerceIn(0.25f, 1.0f),
         secondarySaturation = secondarySaturation.coerceIn(0.25f, 1.0f),
         artworkCornerDp = artworkCornerDp.coerceIn(0f, 36f),
+        artworkScale = artworkScale.coerceIn(0.64f, 0.98f),
+        artworkShadowElevationDp = artworkShadowElevationDp.coerceIn(0f, 32f),
         playerControlDockOpacity = playerControlDockOpacity.coerceIn(0.05f, 0.80f),
         doubleTapSeekSeconds = doubleTapSeekSeconds.coerceIn(5, 30),
         shakeSensitivity = shakeSensitivity.coerceIn(0.1f, 1.0f),
         miniPlayerHeightDp = miniPlayerHeightDp.coerceIn(56f, 84f),
         lyricsFontSizeSp = lyricsFontSizeSp.coerceIn(16f, 36f),
+        lyricsLineSpacingDp = lyricsLineSpacingDp.coerceIn(6f, 26f),
         lyricsBackdropBlurDp = lyricsBackdropBlurDp.coerceIn(0f, 34f),
         lyricsOffsetMs = lyricsOffsetMs.coerceIn(-5_000L, 5_000L),
         transitionSpeed = transitionSpeed.coerceIn(0.5f, 2.0f),
@@ -234,6 +355,10 @@ object PrimePresets {
         primaryHue = 272f,
         secondaryHue = 330f,
         playerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.BLURRED_COVER,
+        playerButtonStyle = PrimePlayerButtonStyle.GRADIENT_CIRCLE,
+        miniPlayerStyle = PrimeMiniPlayerStyle.FLOATING_GLASS,
+        artworkShape = PrimeArtworkShape.ROUNDED,
         progressStyle = PrimeProgressStyle.WAVEFORM,
         visualizerStyle = PrimeVisualizerStyle.SPECTRUM_BARS,
     )
@@ -249,7 +374,11 @@ object PrimePresets {
         primaryHue = 186f,
         secondaryHue = 262f,
         playerStyle = PrimePlayerStyle.FROSTED_GLASS,
-        progressStyle = PrimeProgressStyle.SQUIGGLY,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.LIVE_MESH,
+        playerButtonStyle = PrimePlayerButtonStyle.OUTLINED_NEON,
+        miniPlayerStyle = PrimeMiniPlayerStyle.FLOATING_GLASS,
+        artworkShape = PrimeArtworkShape.SQUIRCLE,
+        progressStyle = PrimeProgressStyle.GLOW_BAR,
         visualizerStyle = PrimeVisualizerStyle.PULSE_WAVE,
     )
 
@@ -261,9 +390,79 @@ object PrimePresets {
         ambientGlowStrength = 0.65f,
         colorMode = PrimeColorMode.ALBUM_MORPH,
         playerStyle = PrimePlayerStyle.FULLSCREEN_COVER,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.DYNAMIC_GRADIENT,
+        playerButtonStyle = PrimePlayerButtonStyle.SQUIRCLE_EXPRESSIVE,
+        miniPlayerStyle = PrimeMiniPlayerStyle.CAPSULE_PILL,
+        artworkShape = PrimeArtworkShape.ROUNDED,
+        artworkScale = 0.92f,
         progressStyle = PrimeProgressStyle.CAPSULE,
         visualizerStyle = PrimeVisualizerStyle.ORBIT_RINGS,
         lyricsAlign = PrimeLyricsAlign.CENTER,
+        lyricsAnimStyle = PrimeLyricsAnimStyle.NEON_GLOW,
+    )
+
+    val SakuraVapor = CroixDesignState(
+        presetName = "Sakura Vapor",
+        glassOpacity = 0.20f,
+        glassBlurDp = 26f,
+        borderGlowAlpha = 0.30f,
+        cornerRadiusDp = 26f,
+        ambientGlowStrength = 0.62f,
+        fontStyle = PrimeFontStyle.EDITORIAL_SERIF,
+        colorMode = PrimeColorMode.CUSTOM_GRADIENT,
+        primaryHue = 336f,
+        secondaryHue = 286f,
+        primarySaturation = 0.56f,
+        secondarySaturation = 0.58f,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.LIVE_MESH,
+        playerButtonStyle = PrimePlayerButtonStyle.SQUIRCLE_EXPRESSIVE,
+        miniPlayerStyle = PrimeMiniPlayerStyle.CAPSULE_PILL,
+        artworkShape = PrimeArtworkShape.SQUIRCLE,
+        progressStyle = PrimeProgressStyle.SQUIGGLY,
+        lyricsAlign = PrimeLyricsAlign.CENTER,
+        lyricsAnimStyle = PrimeLyricsAnimStyle.SCALE_POP,
+    )
+
+    val CyberLime = CroixDesignState(
+        presetName = "Ciber Lima",
+        glassOpacity = 0.12f,
+        glassBlurDp = 18f,
+        borderGlowAlpha = 0.40f,
+        borderWidthDp = 1.4f,
+        cornerRadiusDp = 14f,
+        fontStyle = PrimeFontStyle.TECH_MONO,
+        colorMode = PrimeColorMode.CUSTOM_GRADIENT,
+        primaryHue = 88f,
+        secondaryHue = 178f,
+        primarySaturation = 0.92f,
+        secondarySaturation = 0.88f,
+        pureBlackBackground = true,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.SOLID_DARK,
+        playerButtonStyle = PrimePlayerButtonStyle.OUTLINED_NEON,
+        miniPlayerStyle = PrimeMiniPlayerStyle.PURE_AMOLED,
+        artworkShape = PrimeArtworkShape.CUT_CORNERS,
+        progressStyle = PrimeProgressStyle.DASHED_EQ,
+        visualizerStyle = PrimeVisualizerStyle.SPECTRUM_BARS,
+        lyricsAnimStyle = PrimeLyricsAnimStyle.KARAOKE_SLIDE,
+    )
+
+    val NordicAurora = CroixDesignState(
+        presetName = "Aurora Nórdica",
+        glassOpacity = 0.18f,
+        glassBlurDp = 24f,
+        borderGlowAlpha = 0.26f,
+        ambientGlowStrength = 0.68f,
+        colorMode = PrimeColorMode.CUSTOM_GRADIENT,
+        primaryHue = 166f,
+        secondaryHue = 236f,
+        primarySaturation = 0.82f,
+        secondarySaturation = 0.86f,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.LIVE_MESH,
+        playerButtonStyle = PrimePlayerButtonStyle.GLASS_FROSTED,
+        miniPlayerStyle = PrimeMiniPlayerStyle.FLOATING_GLASS,
+        artworkShape = PrimeArtworkShape.SQUIRCLE,
+        progressStyle = PrimeProgressStyle.GLOW_BAR,
+        lyricsAnimStyle = PrimeLyricsAnimStyle.NEON_GLOW,
     )
 
     val SunsetCoral = CroixDesignState(
@@ -278,6 +477,7 @@ object PrimePresets {
         primarySaturation = 0.88f,
         secondarySaturation = 0.85f,
         playerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.DYNAMIC_GRADIENT,
         progressStyle = PrimeProgressStyle.WAVEFORM,
     )
 
@@ -293,6 +493,7 @@ object PrimePresets {
         primarySaturation = 0.85f,
         secondarySaturation = 0.82f,
         playerStyle = PrimePlayerStyle.FROSTED_GLASS,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.BLURRED_COVER,
         progressStyle = PrimeProgressStyle.CAPSULE,
     )
 
@@ -303,13 +504,40 @@ object PrimePresets {
         borderGlowAlpha = 0.32f,
         ambientGlowStrength = 0.44f,
         pureBlackBackground = true,
+        fontStyle = PrimeFontStyle.EDITORIAL_SERIF,
         colorMode = PrimeColorMode.CUSTOM_GRADIENT,
         primaryHue = 42f,
         secondaryHue = 22f,
         primarySaturation = 0.90f,
         secondarySaturation = 0.82f,
         playerStyle = PrimePlayerStyle.MINIMAL_CLEAN,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.PURE_AMOLED,
+        playerButtonStyle = PrimePlayerButtonStyle.OUTLINED_NEON,
+        artworkShape = PrimeArtworkShape.CIRCLE_VINYL,
+        vinylSpinEnabled = true,
         progressStyle = PrimeProgressStyle.THIN_LINE,
+    )
+
+    val MonoStudio = CroixDesignState(
+        presetName = "Estudio Monocromo",
+        glassOpacity = 0.11f,
+        glassBlurDp = 16f,
+        borderGlowAlpha = 0.22f,
+        cornerRadiusDp = 12f,
+        ambientGlowStrength = 0.18f,
+        useGradientStyle = false,
+        fontStyle = PrimeFontStyle.COMPACT_CLEAN,
+        colorMode = PrimeColorMode.CUSTOM_GRADIENT,
+        primaryHue = 220f,
+        secondaryHue = 220f,
+        primarySaturation = 0.25f,
+        secondarySaturation = 0.25f,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.SOLID_DARK,
+        playerButtonStyle = PrimePlayerButtonStyle.GLASS_FROSTED,
+        miniPlayerStyle = PrimeMiniPlayerStyle.DOCKED_MINIMAL,
+        artworkShape = PrimeArtworkShape.SQUARE,
+        progressStyle = PrimeProgressStyle.THIN_LINE,
+        slimNavBar = true,
     )
 
     val AmoledObsidian = CroixDesignState(
@@ -323,6 +551,8 @@ object PrimePresets {
         cornerRadiusDp = 16f,
         colorMode = PrimeColorMode.AMOLED_BLACK,
         playerStyle = PrimePlayerStyle.MINIMAL_CLEAN,
+        playerBackgroundStyle = PrimePlayerBackgroundStyle.PURE_AMOLED,
+        miniPlayerStyle = PrimeMiniPlayerStyle.PURE_AMOLED,
         progressStyle = PrimeProgressStyle.THIN_LINE,
         visualizerStyle = PrimeVisualizerStyle.OFF,
         miniPlayerFloating = false,
@@ -335,6 +565,7 @@ object PrimePresets {
         borderGlowAlpha = 0.22f,
         colorMode = PrimeColorMode.DYNAMIC_SYSTEM,
         playerStyle = PrimePlayerStyle.TRANSLUCENT_CARD,
+        playerButtonStyle = PrimePlayerButtonStyle.SQUIRCLE_EXPRESSIVE,
         progressStyle = PrimeProgressStyle.CAPSULE,
     )
 
@@ -342,9 +573,13 @@ object PrimePresets {
         PrimeVioletGlass,
         FrostedNeonCyan,
         AlbumMorphLive,
+        SakuraVapor,
+        CyberLime,
+        NordicAurora,
         SunsetCoral,
         DeepEmerald,
         MidnightGold,
+        MonoStudio,
         AmoledObsidian,
         DynamicGlass,
     )
@@ -385,7 +620,39 @@ class CroixDesignRepository(private val context: Context) {
 
     suspend fun applyPreset(preset: CroixDesignState) {
         context.croixDesignDataStore.edit { prefs ->
-            prefs[key] = CroixThemeJson.export(preset)
+            val existing = prefs[key]?.let { CroixThemeJson.import(it).getOrNull() }
+            // Preserve user's language, privacy, cache, SponsorBlock, app icon & startup prefs when applying visual presets!
+            val merged = if (existing != null) {
+                preset.copy(
+                    languageMode = existing.languageMode,
+                    privateSessionEnabled = existing.privateSessionEnabled,
+                    audioCacheLimitMb = existing.audioCacheLimitMb,
+                    sponsorBlockEnabled = existing.sponsorBlockEnabled,
+                    skipMusicOfftopic = existing.skipMusicOfftopic,
+                    skipSponsors = existing.skipSponsors,
+                    skipIntroOutro = existing.skipIntroOutro,
+                    appIconId = existing.appIconId,
+                    defaultStartTab = existing.defaultStartTab,
+                    randomThemeOnStartup = existing.randomThemeOnStartup,
+                    audioQuality = existing.audioQuality,
+                    normalizeAudio = existing.normalizeAudio,
+                    autoPlayRelated = existing.autoPlayRelated,
+                    crossfadeSeconds = existing.crossfadeSeconds,
+                    autoOutputProfilesEnabled = existing.autoOutputProfilesEnabled,
+                    bluetoothAutoEqPreset = existing.bluetoothAutoEqPreset,
+                    wiredAutoEqPreset = existing.wiredAutoEqPreset,
+                    speakerAutoEqPreset = existing.speakerAutoEqPreset,
+                ).clamped()
+            } else {
+                preset.clamped()
+            }
+            prefs[key] = CroixThemeJson.export(merged)
+        }
+    }
+
+    suspend fun resetToDefaults() {
+        context.croixDesignDataStore.edit { prefs ->
+            prefs[key] = CroixThemeJson.export(PrimePresets.PrimeVioletGlass)
         }
     }
 }

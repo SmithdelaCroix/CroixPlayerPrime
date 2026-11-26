@@ -9,19 +9,26 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.AudioManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -85,6 +92,8 @@ import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.VolumeDown
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -115,6 +124,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -133,13 +143,20 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.croix.prime.design.CroixAudioVisualizer
 import com.croix.prime.design.CroixGlassCard
+import com.croix.prime.design.CroixLiveMeshBackdrop
 import com.croix.prime.design.CroixSeekBar
 import com.croix.prime.design.LocalCroixDesign
 import com.croix.prime.design.LocalCroixPalette
 import com.croix.prime.design.LocalCroixStrings
+import com.croix.prime.design.PrimeArtworkShape
 import com.croix.prime.design.PrimeLyricsAlign
+import com.croix.prime.design.PrimeLyricsAnimStyle
+import com.croix.prime.design.PrimeMiniPlayerStyle
+import com.croix.prime.design.PrimePlayerBackgroundStyle
+import com.croix.prime.design.PrimePlayerButtonStyle
 import com.croix.prime.design.PrimePlayerStyle
 import com.croix.prime.design.PrimeTransitionStyle
+import com.croix.prime.design.resolveArtworkShape
 import com.croix.prime.engine.LrcParser
 import com.croix.prime.engine.LyricsResult
 import com.croix.prime.engine.LyricsRomanizer
@@ -291,6 +308,7 @@ fun MiniPlayerBar(
     onExpand: () -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
+    onPrev: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val track = playback.currentTrack ?: return
@@ -301,26 +319,53 @@ fun MiniPlayerBar(
     } else 60_000L
     val reveal = computeBlindReveal(playback.blindDiscoveryMode, playback.blindManualReveal, blindPos)
     val hiddenTitle = playback.blindDiscoveryMode && reveal < 0.65f
+    var miniDragX by remember { mutableFloatStateOf(0f) }
 
-    val hPad = if (design.miniPlayerFloating) 16.dp else 0.dp
-    val corner = if (design.miniPlayerFloating) design.cornerRadiusDp.dp else 0.dp
+    val effectiveStyle = if (!design.miniPlayerFloating && design.miniPlayerStyle == PrimeMiniPlayerStyle.FLOATING_GLASS) {
+        PrimeMiniPlayerStyle.DOCKED_MINIMAL
+    } else {
+        design.miniPlayerStyle
+    }
 
-    CroixGlassCard(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = hPad)
-            .height(design.miniPlayerHeightDp.dp),
-        hazeState = hazeState,
-        cornerRadius = corner,
-        opacityOverride = (design.glassOpacity + 0.12f).coerceAtMost(0.85f),
-        onClick = onExpand,
-    ) {
+    val hPad = when (effectiveStyle) {
+        PrimeMiniPlayerStyle.CAPSULE_PILL -> 22.dp
+        PrimeMiniPlayerStyle.DOCKED_MINIMAL -> 0.dp
+        PrimeMiniPlayerStyle.FLOATING_GLASS, PrimeMiniPlayerStyle.PURE_AMOLED ->
+            if (design.miniPlayerFloating) 16.dp else 0.dp
+    }
+    val corner = when (effectiveStyle) {
+        PrimeMiniPlayerStyle.CAPSULE_PILL -> 50.dp
+        PrimeMiniPlayerStyle.DOCKED_MINIMAL -> 0.dp
+        PrimeMiniPlayerStyle.FLOATING_GLASS, PrimeMiniPlayerStyle.PURE_AMOLED ->
+            if (design.miniPlayerFloating) design.cornerRadiusDp.dp else 0.dp
+    }
+    val isAmoled = effectiveStyle == PrimeMiniPlayerStyle.PURE_AMOLED
+    val coverShape = if (effectiveStyle == PrimeMiniPlayerStyle.CAPSULE_PILL) CircleShape else RoundedCornerShape(12.dp)
+
+    val swipeModifier = Modifier
+        .offset { IntOffset(miniDragX.roundToInt(), 0) }
+        .pointerInput(design.swipeMiniPlayerToSkip) {
+            if (!design.swipeMiniPlayerToSkip) return@pointerInput
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    if (miniDragX < -95f) onNext()
+                    else if (miniDragX > 95f) onPrev()
+                    miniDragX = 0f
+                },
+                onDragCancel = { miniDragX = 0f },
+                onHorizontalDrag = { _, dragAmount ->
+                    miniDragX = (miniDragX + dragAmount).coerceIn(-160f, 160f)
+                },
+            )
+        }
+
+    val barContent: @Composable () -> Unit = {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = if (effectiveStyle == PrimeMiniPlayerStyle.CAPSULE_PILL) 14.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -330,7 +375,7 @@ fun MiniPlayerBar(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(coverShape)
                             .blur(((1f - reveal) * 18f).dp)
                             .background(Color.White.copy(alpha = 0.1f)),
                     )
@@ -347,6 +392,7 @@ fun MiniPlayerBar(
                         color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = if (design.marqueeTrackTitle) Modifier.basicMarquee() else Modifier,
                     )
                     Text(
                         text = if (hiddenTitle) {
@@ -382,7 +428,39 @@ fun MiniPlayerBar(
                 positionMsFlow = positionMsFlow,
                 durationMs = playback.durationMs,
                 accent = palette.primary,
+                horizontalInset = if (effectiveStyle == PrimeMiniPlayerStyle.CAPSULE_PILL) 24.dp else 0.dp,
             )
+        }
+    }
+
+    if (isAmoled) {
+        val shape = RoundedCornerShape(corner)
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = hPad)
+                .then(swipeModifier)
+                .height(design.miniPlayerHeightDp.dp)
+                .clip(shape)
+                .background(Color.Black)
+                .border(1.2.dp, palette.primary.copy(alpha = 0.55f), shape)
+                .clickable(onClick = onExpand),
+        ) {
+            barContent()
+        }
+    } else {
+        CroixGlassCard(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = hPad)
+                .then(swipeModifier)
+                .height(design.miniPlayerHeightDp.dp),
+            hazeState = hazeState,
+            cornerRadius = corner,
+            opacityOverride = (design.glassOpacity + 0.12f).coerceAtMost(0.85f),
+            onClick = onExpand,
+        ) {
+            barContent()
         }
     }
 }
@@ -392,6 +470,7 @@ private fun MiniPlayerProgressLine(
     positionMsFlow: StateFlow<Long>,
     durationMs: Long,
     accent: Color,
+    horizontalInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     val pos by positionMsFlow.collectAsState()
     val progress = if (durationMs > 0L) (pos.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
@@ -399,6 +478,7 @@ private fun MiniPlayerProgressLine(
         progress = { progress },
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = horizontalInset)
             .height(2.5.dp),
         color = accent,
         trackColor = Color.White.copy(alpha = 0.12f),
@@ -517,38 +597,81 @@ fun NowPlayingOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(palette.background)
+            .background(
+                if (design.playerBackgroundStyle == PrimePlayerBackgroundStyle.PURE_AMOLED) Color.Black
+                else palette.background,
+            )
             .clickable(interactionSource = touchBlocker, indication = null) {},
     ) {
         val animateCanvas = design.canvasMotionEnabled && playback.isPlaying
-        AsyncImage(
-            model = track.thumbnailUrl,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    if (animateCanvas) {
-                        scaleX = canvasScale
-                        scaleY = canvasScale
-                        translationX = canvasDriftX
-                    }
-                }
-                .blur(if (activePanel == 1) design.lyricsBackdropBlurDp.dp else (design.glassBlurDp + 8f).dp),
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.Black.copy(alpha = 0.36f),
-                            palette.background.copy(alpha = 0.74f),
-                            palette.background.copy(alpha = 0.94f),
+        when (design.playerBackgroundStyle) {
+            PrimePlayerBackgroundStyle.BLURRED_COVER -> {
+                AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            if (animateCanvas) {
+                                scaleX = canvasScale
+                                scaleY = canvasScale
+                                translationX = canvasDriftX
+                            }
+                        }
+                        .blur(if (activePanel == 1) design.lyricsBackdropBlurDp.dp else (design.glassBlurDp + 8f).dp),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Black.copy(alpha = 0.36f),
+                                    palette.background.copy(alpha = 0.74f),
+                                    palette.background.copy(alpha = 0.94f),
+                                ),
+                            ),
                         ),
-                    ),
-                ),
-        )
+                )
+            }
+            PrimePlayerBackgroundStyle.DYNAMIC_GRADIENT -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    palette.primary.copy(alpha = 0.62f),
+                                    palette.secondary.copy(alpha = 0.28f),
+                                    palette.background.copy(alpha = 0.96f),
+                                ),
+                            ),
+                        ),
+                )
+            }
+            PrimePlayerBackgroundStyle.LIVE_MESH -> {
+                CroixLiveMeshBackdrop(animate = animateCanvas)
+            }
+            PrimePlayerBackgroundStyle.SOLID_DARK -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    palette.primary.copy(alpha = 0.16f),
+                                    Color(0xFF0C0B13),
+                                    Color(0xFF08070D),
+                                ),
+                            ),
+                        ),
+                )
+            }
+            PrimePlayerBackgroundStyle.PURE_AMOLED -> {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+            }
+        }
 
         Column(
             modifier = Modifier
@@ -719,13 +842,15 @@ fun NowPlayingOverlay(
                 ) { panel ->
                     when (panel) {
                         0 -> {
-                            val artShape = if (design.vinylSpinEnabled) CircleShape else RoundedCornerShape(design.artworkCornerDp.dp)
-                            val artFill = when (design.playerStyle) {
+                            val artShape = resolveArtworkShape(design)
+                            val styleBaseScale = when (design.playerStyle) {
                                 PrimePlayerStyle.FULLSCREEN_COVER -> 0.94f
-                                PrimePlayerStyle.MINIMAL_CLEAN -> 0.70f
-                                else -> 0.84f
+                                PrimePlayerStyle.MINIMAL_CLEAN -> 0.74f
+                                else -> design.artworkScale
                             }
-                            val rotation = if (design.vinylSpinEnabled && playback.isPlaying) angle else 0f
+                            val artFill = ((design.artworkScale + styleBaseScale) * 0.5f).coerceIn(0.64f, 0.98f)
+                            val isVinyl = design.vinylSpinEnabled || design.artworkShape == PrimeArtworkShape.CIRCLE_VINYL
+                            val rotation = if (isVinyl && design.vinylSpinEnabled && playback.isPlaying) angle else 0f
                             val blindBlurDp = ((1f - blindReveal) * 34f).dp
 
                             Column(
@@ -733,122 +858,196 @@ fun NowPlayingOverlay(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                CroixGlassCard(
-                                    modifier = Modifier
-                                        .fillMaxWidth(artFill)
-                                        .aspectRatio(1f)
-                                        .offset { IntOffset(dragOffsetX.roundToInt(), 0) }
-                                        .graphicsLayer {
-                                            if (design.artworkParallax3d) {
-                                                cameraDistance = 12f * density
-                                                rotationX = tilt.rotX
-                                                rotationY = tilt.rotY
+                                if (design.hidePlayerArtwork) {
+                                    // Minimal Cover-Free Focus Mode
+                                    CroixGlassCard(
+                                        modifier = Modifier.fillMaxWidth(0.88f),
+                                        accentTint = palette.primary,
+                                        onClick = { if (design.tapArtworkToPlayPause) onTogglePlay() },
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth().padding(28.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            Text(
+                                                text = if (isMysteryHidden) "???" else track.title,
+                                                style = MaterialTheme.typography.headlineMedium,
+                                                color = Color.White,
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = if (isMysteryHidden) "Modo Misterio" else track.artist,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = palette.primary,
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 1,
+                                            )
+                                            if (track.album.isNotBlank() && !isMysteryHidden) {
+                                                Text(
+                                                    text = track.album,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = palette.textSecondary,
+                                                    textAlign = TextAlign.Center,
+                                                    maxLines = 1,
+                                                )
                                             }
                                         }
-                                        .pointerInput(design.swipeArtworkToSkip) {
-                                            if (!design.swipeArtworkToSkip) return@pointerInput
-                                            detectHorizontalDragGestures(
-                                                onDragEnd = {
-                                                    if (dragOffsetX < -130f) onNext()
-                                                    else if (dragOffsetX > 130f) onPrev()
-                                                    dragOffsetX = 0f
-                                                },
-                                                onDragCancel = { dragOffsetX = 0f },
-                                                onHorizontalDrag = { _, dragAmount ->
-                                                    dragOffsetX = (dragOffsetX + dragAmount).coerceIn(-240f, 240f)
-                                                },
-                                            )
-                                        }
-                                        .pointerInput(design.doubleTapSeekSeconds) {
-                                            detectTapGestures(
-                                                onDoubleTap = { offset ->
-                                                    val delta = design.doubleTapSeekSeconds * 1_000L
-                                                    if (offset.x < size.width / 2f) onSeekRelative(-delta)
-                                                    else onSeekRelative(delta)
-                                                },
-                                            )
-                                        },
-                                    cornerRadius = if (design.vinylSpinEnabled) 200.dp else design.artworkCornerDp.dp,
-                                ) {
-                                    Box(modifier = Modifier.fillMaxSize().clip(artShape)) {
-                                        AsyncImage(
-                                            model = track.thumbnailUrl,
-                                            contentDescription = track.title,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .graphicsLayer {
-                                                    if (design.artworkParallax3d) {
-                                                        scaleX = 1.13f
-                                                        scaleY = 1.13f
-                                                        translationX = tilt.innerShiftX
-                                                        translationY = tilt.innerShiftY
-                                                    }
-                                                }
-                                                .rotate(rotation)
-                                                .blur(blindBlurDp),
+                                    }
+                                } else {
+                                    val shadowMod = if (design.artworkShadowEnabled && design.artworkShadowElevationDp > 0.5f) {
+                                        Modifier.shadow(
+                                            elevation = design.artworkShadowElevationDp.dp,
+                                            shape = artShape,
+                                            ambientColor = palette.primary,
+                                            spotColor = palette.primary,
                                         )
-
-                                        // Holographic 3D Specular Sheen sliding with phone tilt (BETA)
-                                        if (design.artworkParallax3d && tilt.sensorActive) {
-                                            Box(
+                                    } else {
+                                        Modifier
+                                    }
+                                    CroixGlassCard(
+                                        modifier = Modifier
+                                            .fillMaxWidth(artFill)
+                                            .aspectRatio(1f)
+                                            .offset { IntOffset(dragOffsetX.roundToInt(), 0) }
+                                            .then(shadowMod)
+                                            .graphicsLayer {
+                                                if (design.artworkParallax3d) {
+                                                    cameraDistance = 12f * density
+                                                    rotationX = tilt.rotX
+                                                    rotationY = tilt.rotY
+                                                }
+                                            }
+                                            .pointerInput(design.swipeArtworkToSkip) {
+                                                if (!design.swipeArtworkToSkip) return@pointerInput
+                                                detectHorizontalDragGestures(
+                                                    onDragEnd = {
+                                                        if (dragOffsetX < -130f) onNext()
+                                                        else if (dragOffsetX > 130f) onPrev()
+                                                        dragOffsetX = 0f
+                                                    },
+                                                    onDragCancel = { dragOffsetX = 0f },
+                                                    onHorizontalDrag = { _, dragAmount ->
+                                                        dragOffsetX = (dragOffsetX + dragAmount).coerceIn(-240f, 240f)
+                                                    },
+                                                )
+                                            }
+                                            .pointerInput(design.doubleTapSeekSeconds, design.tapArtworkToPlayPause) {
+                                                detectTapGestures(
+                                                    onTap = {
+                                                        if (design.tapArtworkToPlayPause) onTogglePlay()
+                                                    },
+                                                    onDoubleTap = { offset ->
+                                                        val delta = design.doubleTapSeekSeconds * 1_000L
+                                                        if (offset.x < size.width / 2f) onSeekRelative(-delta)
+                                                        else onSeekRelative(delta)
+                                                    },
+                                                )
+                                            },
+                                        shapeOverride = artShape,
+                                    ) {
+                                        Box(modifier = Modifier.fillMaxSize().clip(artShape)) {
+                                            AsyncImage(
+                                                model = track.thumbnailUrl,
+                                                contentDescription = track.title,
+                                                contentScale = ContentScale.Crop,
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .background(
-                                                        Brush.radialGradient(
-                                                            colors = listOf(
-                                                                Color.White.copy(alpha = 0.24f),
-                                                                Color.Transparent,
-                                                            ),
-                                                            center = Offset(tilt.sheenNormX * 900f, tilt.sheenNormY * 900f),
-                                                            radius = 650f,
-                                                        ),
-                                                    ),
+                                                    .graphicsLayer {
+                                                        if (design.artworkParallax3d) {
+                                                            scaleX = 1.13f
+                                                            scaleY = 1.13f
+                                                            translationX = tilt.innerShiftX
+                                                            translationY = tilt.innerShiftY
+                                                        }
+                                                    }
+                                                    .rotate(rotation)
+                                                    .blur(blindBlurDp),
                                             )
-                                        }
 
-                                        // Blind Discovery 45s ??? Mystery Veil + Smooth Fade-out on Reveal
-                                        if (playback.blindDiscoveryMode && blindReveal < 0.98f) {
-                                            val veilAlpha = (1f - blindReveal).coerceIn(0f, 1f)
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .alpha(veilAlpha)
-                                                    .background(
-                                                        Brush.radialGradient(
-                                                            listOf(
-                                                                palette.primary.copy(alpha = 0.45f),
-                                                                Color(0xFF0A0913).copy(alpha = 0.88f),
-                                                            ),
-                                                        ),
-                                                    ),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                Column(
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                            // Vinyl Center Hub Spindle for Circular Vinyl shape
+                                            if (isVinyl) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.Center)
+                                                        .size(46.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color.Black.copy(alpha = 0.72f))
+                                                        .border(2.dp, palette.primary.copy(alpha = 0.8f), CircleShape),
+                                                    contentAlignment = Alignment.Center,
                                                 ) {
                                                     Box(
                                                         modifier = Modifier
-                                                            .size(84.dp)
+                                                            .size(14.dp)
                                                             .clip(CircleShape)
-                                                            .background(Color.White.copy(alpha = 0.14f)),
-                                                        contentAlignment = Alignment.Center,
+                                                            .background(Color.White.copy(alpha = 0.9f)),
+                                                    )
+                                                }
+                                            }
+
+                                            // Holographic 3D Specular Sheen sliding with phone tilt (BETA)
+                                            if (design.artworkParallax3d && tilt.sensorActive) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .background(
+                                                            Brush.radialGradient(
+                                                                colors = listOf(
+                                                                    Color.White.copy(alpha = 0.24f),
+                                                                    Color.Transparent,
+                                                                ),
+                                                                center = Offset(tilt.sheenNormX * 900f, tilt.sheenNormY * 900f),
+                                                                radius = 650f,
+                                                            ),
+                                                        ),
+                                                )
+                                            }
+
+                                            // Blind Discovery 45s ??? Mystery Veil + Smooth Fade-out on Reveal
+                                            if (playback.blindDiscoveryMode && blindReveal < 0.98f) {
+                                                val veilAlpha = (1f - blindReveal).coerceIn(0f, 1f)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .alpha(veilAlpha)
+                                                        .background(
+                                                            Brush.radialGradient(
+                                                                listOf(
+                                                                    palette.primary.copy(alpha = 0.45f),
+                                                                    Color(0xFF0A0913).copy(alpha = 0.88f),
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    contentAlignment = Alignment.Center,
+                                                ) {
+                                                    Column(
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.spacedBy(8.dp),
                                                     ) {
-                                                        Icon(Icons.Rounded.QuestionMark, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(84.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color.White.copy(alpha = 0.14f)),
+                                                            contentAlignment = Alignment.Center,
+                                                        ) {
+                                                            Icon(Icons.Rounded.QuestionMark, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                                                        }
+                                                        Text(
+                                                            text = "???",
+                                                            fontSize = 32.sp,
+                                                            fontWeight = FontWeight.Black,
+                                                            color = Color.White,
+                                                            letterSpacing = 4.sp,
+                                                        )
+                                                        Text(
+                                                            text = if (mysteryCountdownSec > 0) "Revelando en ${mysteryCountdownSec}s" else "Revelando...",
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            color = Color.White.copy(alpha = 0.88f),
+                                                        )
                                                     }
-                                                    Text(
-                                                        text = "???",
-                                                        fontSize = 32.sp,
-                                                        fontWeight = FontWeight.Black,
-                                                        color = Color.White,
-                                                        letterSpacing = 4.sp,
-                                                    )
-                                                    Text(
-                                                        text = if (mysteryCountdownSec > 0) "Revelando en ${mysteryCountdownSec}s" else "Revelando...",
-                                                        style = MaterialTheme.typography.labelLarge,
-                                                        color = Color.White.copy(alpha = 0.88f),
-                                                    )
                                                 }
                                             }
                                         }
@@ -927,12 +1126,14 @@ fun NowPlayingOverlay(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
+                            val titleMaxLines = if (design.twoLineTrackTitle) 2 else 1
                             Text(
                                 text = if (isMysteryHidden) "??? • Pista Misteriosa" else track.title,
                                 style = MaterialTheme.typography.titleLarge,
                                 color = Color.White,
-                                maxLines = 1,
+                                maxLines = titleMaxLines,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = if (design.marqueeTrackTitle && !design.twoLineTrackTitle) Modifier.basicMarquee() else Modifier,
                             )
                             Text(
                                 text = if (isMysteryHidden) "Artista oculto • Escucha sin prejuicios" else track.artist,
@@ -1007,21 +1208,51 @@ fun NowPlayingOverlay(
                             Icon(Icons.Rounded.SkipPrevious, contentDescription = "Anterior", tint = Color.White, modifier = Modifier.size(34.dp))
                         }
 
-                        Box(
-                            modifier = Modifier
+                        val playCorner by animateDpAsState(
+                            targetValue = when (design.playerButtonStyle) {
+                                PrimePlayerButtonStyle.SQUIRCLE_EXPRESSIVE -> if (playback.isPlaying) 18.dp else 32.dp
+                                else -> 32.dp
+                            },
+                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            label = "playCornerMorph",
+                        )
+                        val playShape = RoundedCornerShape(playCorner)
+                        val playBrush = if (design.useGradientStyle) {
+                            Brush.linearGradient(listOf(palette.primary, palette.secondary))
+                        } else {
+                            Brush.linearGradient(listOf(palette.primary, palette.primary))
+                        }
+                        val playMod = when (design.playerButtonStyle) {
+                            PrimePlayerButtonStyle.GRADIENT_CIRCLE,
+                            PrimePlayerButtonStyle.SQUIRCLE_EXPRESSIVE,
+                            -> Modifier
                                 .size(62.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (design.useGradientStyle) Brush.linearGradient(listOf(palette.primary, palette.secondary))
-                                    else Brush.linearGradient(listOf(palette.primary, palette.primary)),
-                                )
-                                .clickable(onClick = onTogglePlay),
+                                .clip(playShape)
+                                .background(playBrush)
+                            PrimePlayerButtonStyle.GLASS_FROSTED -> Modifier
+                                .size(62.dp)
+                                .clip(playShape)
+                                .background(Color.White.copy(alpha = 0.16f))
+                                .border(1.5.dp, palette.glassBorderTop, playShape)
+                            PrimePlayerButtonStyle.OUTLINED_NEON -> Modifier
+                                .size(62.dp)
+                                .clip(playShape)
+                                .background(Color.Black.copy(alpha = 0.45f))
+                                .border(2.5.dp, playBrush, playShape)
+                        }
+                        val playIconTint = when (design.playerButtonStyle) {
+                            PrimePlayerButtonStyle.GLASS_FROSTED, PrimePlayerButtonStyle.OUTLINED_NEON -> palette.primary
+                            else -> Color.White
+                        }
+
+                        Box(
+                            modifier = playMod.clickable(onClick = onTogglePlay),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 if (playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 contentDescription = "Reproducir o pausar",
-                                tint = Color.White,
+                                tint = playIconTint,
                                 modifier = Modifier.size(36.dp),
                             )
                         }
@@ -1052,6 +1283,10 @@ fun NowPlayingOverlay(
                                 Text("Karaoke", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF4081))
                             }
                         }
+                    }
+
+                    if (design.showPlayerVolumeBar) {
+                        PlayerInlineVolumeBar()
                     }
 
                     Row(
@@ -1102,6 +1337,37 @@ fun NowPlayingOverlay(
                 TextButton(onClick = { showAudioInspector = false }) { Text(strings.close) }
             },
         )
+    }
+}
+
+@Composable
+private fun PlayerInlineVolumeBar() {
+    val context = LocalContext.current
+    val palette = LocalCroixPalette.current
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
+    val maxVol = remember(audioManager) { (audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15).coerceAtLeast(1) }
+    var volFraction by remember(audioManager) {
+        val cur = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: (maxVol / 2)
+        mutableFloatStateOf((cur.toFloat() / maxVol.toFloat()).coerceIn(0f, 1f))
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Rounded.VolumeDown, contentDescription = "Menos volumen", tint = palette.textSecondary, modifier = Modifier.size(18.dp))
+        Slider(
+            value = volFraction,
+            onValueChange = { frac ->
+                volFraction = frac
+                val targetIdx = (frac * maxVol).roundToInt().coerceIn(0, maxVol)
+                audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, targetIdx, 0)
+            },
+            valueRange = 0f..1f,
+            modifier = Modifier.weight(1f).height(26.dp),
+        )
+        Icon(Icons.Rounded.VolumeUp, contentDescription = "Más volumen", tint = palette.primary, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -1414,18 +1680,55 @@ private fun SyncedLyricsProPanel(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(vertical = 18.dp, horizontal = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(design.lyricsLineSpacingDp.dp),
             ) {
                 itemsIndexed(lyrics.synced) { idx, line ->
                     val isCurrent = idx == activeIdx
                     val isSel = idx in selectedIndices
                     val rom = if (showRomanized) LyricsRomanizer.romanize(line.text) else ""
                     val tr = if (showTranslation) translatedLyrics.getOrNull(idx).orEmpty() else ""
-                    Column(
+
+                    val lineScale by animateFloatAsState(
+                        targetValue = when {
+                            isCurrent && design.lyricsAnimStyle == PrimeLyricsAnimStyle.SCALE_POP -> 1.05f
+                            !isCurrent && design.lyricsAnimStyle == PrimeLyricsAnimStyle.SCALE_POP -> 0.96f
+                            else -> 1.0f
+                        },
+                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        label = "lyricScale",
+                    )
+                    val lineAlpha by animateFloatAsState(
+                        targetValue = if (isCurrent || isSel) 1f else 0.44f,
+                        animationSpec = tween(260),
+                        label = "lyricAlpha",
+                    )
+                    val lineOffsetX by animateDpAsState(
+                        targetValue = if (isCurrent && design.lyricsAnimStyle == PrimeLyricsAnimStyle.KARAOKE_SLIDE) 10.dp else 0.dp,
+                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        label = "lyricSlide",
+                    )
+
+                    val activePillBg = when {
+                        isSel -> palette.primary.copy(alpha = 0.32f)
+                        isCurrent && (design.lyricsAnimStyle == PrimeLyricsAnimStyle.NEON_GLOW || design.lyricsActiveGlow) ->
+                            palette.primary.copy(alpha = if (design.lyricsAnimStyle == PrimeLyricsAnimStyle.NEON_GLOW) 0.22f else 0.12f)
+                        else -> Color.Transparent
+                    }
+                    val activePillBorder = if (isCurrent && design.lyricsAnimStyle == PrimeLyricsAnimStyle.NEON_GLOW) {
+                        Modifier.border(1.dp, palette.primary.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                    } else Modifier
+
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSel) palette.primary.copy(alpha = 0.32f) else Color.Transparent)
+                            .offset(x = lineOffsetX)
+                            .graphicsLayer {
+                                scaleX = lineScale
+                                scaleY = lineScale
+                            }
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(activePillBg)
+                            .then(activePillBorder)
                             .clickable {
                                 if (shareMode) {
                                     if (isSel) selectedIndices.remove(idx)
@@ -1434,34 +1737,47 @@ private fun SyncedLyricsProPanel(
                                     onSeekMs((line.timeMs - offsetMs).coerceAtLeast(0L))
                                 }
                             }
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = line.text,
-                            fontSize = if (isCurrent) (design.lyricsFontSizeSp + 2f).sp else design.lyricsFontSizeSp.sp,
-                            fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (isCurrent || isSel) Color.White else Color.White.copy(alpha = 0.44f),
-                            textAlign = align,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        if (rom.isNotBlank()) {
-                            Text(
-                                text = rom,
-                                fontSize = (design.lyricsFontSizeSp * 0.56f).sp,
-                                color = if (isCurrent) palette.secondary else palette.secondary.copy(alpha = 0.55f),
-                                textAlign = align,
-                                modifier = Modifier.fillMaxWidth(),
+                        if (isCurrent && design.lyricsAnimStyle == PrimeLyricsAnimStyle.KARAOKE_SLIDE) {
+                            Box(
+                                modifier = Modifier
+                                    .width(4.dp)
+                                    .height(26.dp)
+                                    .clip(RoundedCornerShape(50.dp))
+                                    .background(Brush.verticalGradient(listOf(palette.primary, palette.secondary))),
                             )
+                            Spacer(Modifier.width(10.dp))
                         }
-                        if (tr.isNotBlank()) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = tr,
-                                fontSize = (design.lyricsFontSizeSp * 0.64f).sp,
-                                fontStyle = FontStyle.Italic,
-                                color = if (isCurrent) Color.White.copy(alpha = 0.86f) else Color.White.copy(alpha = 0.36f),
+                                text = line.text,
+                                fontSize = if (isCurrent) (design.lyricsFontSizeSp + 2f).sp else design.lyricsFontSizeSp.sp,
+                                fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (isCurrent && design.lyricsActiveGlow) Color.White else Color.White.copy(alpha = lineAlpha),
                                 textAlign = align,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            if (rom.isNotBlank()) {
+                                Text(
+                                    text = rom,
+                                    fontSize = (design.lyricsFontSizeSp * 0.56f).sp,
+                                    color = if (isCurrent) palette.secondary else palette.secondary.copy(alpha = 0.55f),
+                                    textAlign = align,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                            if (tr.isNotBlank()) {
+                                Text(
+                                    text = tr,
+                                    fontSize = (design.lyricsFontSizeSp * 0.64f).sp,
+                                    fontStyle = FontStyle.Italic,
+                                    color = if (isCurrent) Color.White.copy(alpha = 0.86f) else Color.White.copy(alpha = 0.36f),
+                                    textAlign = align,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                         }
                     }
                 }
